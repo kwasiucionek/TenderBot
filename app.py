@@ -1208,6 +1208,8 @@ conn.row_factory = sqlite3.Row
 # ╚══════════════════════════════════════════════════════════╝
 
 
+
+
 # ─── RAG ───
 with st.expander("🔍 Zapytaj o ogłoszenia (RAG)", expanded=True):
     rag_col1, rag_col2 = st.columns([4, 1])
@@ -1265,68 +1267,68 @@ with st.expander("🔍 Zapytaj o ogłoszenia (RAG)", expanded=True):
     if st.session_state.get("rag_answer"):
         st.markdown("**Odpowiedź:**")
         st.markdown(st.session_state["rag_answer"])
-        _rag_ids = st.session_state.get("rag_hits_ids", [])
-        if _rag_ids:
-            _sort_col, _count_col = st.columns([2, 3])
-            with _sort_col:
-                _rag_sort = st.selectbox(
-                    "Sortuj źródła",
-                    [
-                        "Trafność (domyślna)",
-                        "⏰ Deadline (rosnąco)",
-                        "⏰ Deadline (malejąco)",
-                        "📅 Data publikacji (najnowsze)",
-                        "⭐ Oznaczone najpierw",
-                        "🇵🇱 Krajowe najpierw",
-                        "🇪🇺 Unijne najpierw",
-                        "📋 Typ zamówienia",
-                    ],
-                    key="rag_sort",
-                    label_visibility="collapsed",
-                )
 
-            # Pobierz wszystkie wiersze
-            _rag_ignored = load_ignored_cpv()
-            _rag_rows = []
-            for _oid in _rag_ids:
-                _nr = conn.execute(
-                    """SELECT n.*,
-                       CASE WHEN s.object_id IS NOT NULL THEN 1 ELSE 0 END as has_summary
-                       FROM notices n
-                       LEFT JOIN summaries s ON s.object_id = n.object_id
-                       WHERE n.object_id = ?""",
-                    (_oid,),
-                ).fetchone()
-                if _nr:
-                    _rag_rows.append(_nr)
+# Wyniki RAG — poza expander żeby ogłoszenia mogły być expanderami
+_rag_ids = st.session_state.get("rag_hits_ids", [])
+if _rag_ids:
+    _sort_col, _count_col = st.columns([2, 3])
+    with _sort_col:
+        _rag_sort = st.selectbox(
+            "Sortuj źródła",
+            [
+                "Trafność (domyślna)",
+                "⏰ Deadline (rosnąco)",
+                "⏰ Deadline (malejąco)",
+                "📅 Data publikacji (najnowsze)",
+                "⭐ Oznaczone najpierw",
+                "🇵🇱 Krajowe najpierw",
+                "🇪🇺 Unijne najpierw",
+                "📋 Typ zamówienia",
+            ],
+            key="rag_sort",
+            label_visibility="collapsed",
+        )
 
-            # Sortowanie
-            _now_iso = datetime.now(timezone.utc).isoformat()
-            def _deadline_key(r):
-                d = r["submitting_offers_date"] or ""
-                return d if d else "9999-99-99"
+    _rag_ignored = load_ignored_cpv()
+    _rag_rows = []
+    for _oid in _rag_ids:
+        _nr = conn.execute(
+            """SELECT n.*,
+               CASE WHEN s.object_id IS NOT NULL THEN 1 ELSE 0 END as has_summary
+               FROM notices n
+               LEFT JOIN summaries s ON s.object_id = n.object_id
+               WHERE n.object_id = ?""",
+            (_oid,),
+        ).fetchone()
+        if _nr:
+            _rag_rows.append(_nr)
 
-            if _rag_sort == "⏰ Deadline (rosnąco)":
-                _rag_rows.sort(key=_deadline_key)
-            elif _rag_sort == "⏰ Deadline (malejąco)":
-                _rag_rows.sort(key=_deadline_key, reverse=True)
-            elif _rag_sort == "📅 Data publikacji (najnowsze)":
-                _rag_rows.sort(key=lambda r: r["publication_date"] or "", reverse=True)
-            elif _rag_sort == "⭐ Oznaczone najpierw":
-                _rag_rows.sort(key=lambda r: (0 if r["user_status"] == "starred" else 1))
-            elif _rag_sort == "🇵🇱 Krajowe najpierw":
-                _rag_rows.sort(key=lambda r: (0 if not r["object_id"].startswith("ted-") else 1))
-            elif _rag_sort == "🇪🇺 Unijne najpierw":
-                _rag_rows.sort(key=lambda r: (0 if r["object_id"].startswith("ted-") else 1))
-            elif _rag_sort == "📋 Typ zamówienia":
-                _rag_rows.sort(key=lambda r: r["tender_type"] or "")
-            # "Trafność" — zachowaj oryginalną kolejność z FTS
+    _now_iso = datetime.now(timezone.utc).isoformat()
+    def _deadline_key(r):
+        d = r["submitting_offers_date"] or ""
+        return d if d else "9999-99-99"
 
-            with _count_col:
-                st.caption(f"**{len(_rag_rows)} ogłoszeń**")
+    if _rag_sort == "⏰ Deadline (rosnąco)":
+        _rag_rows.sort(key=_deadline_key)
+    elif _rag_sort == "⏰ Deadline (malejąco)":
+        _rag_rows.sort(key=_deadline_key, reverse=True)
+    elif _rag_sort == "📅 Data publikacji (najnowsze)":
+        _rag_rows.sort(key=lambda r: r["publication_date"] or "", reverse=True)
+    elif _rag_sort == "⭐ Oznaczone najpierw":
+        _rag_rows.sort(key=lambda r: (0 if r["user_status"] == "starred" else 1))
+    elif _rag_sort == "🇵🇱 Krajowe najpierw":
+        _rag_rows.sort(key=lambda r: (0 if not r["object_id"].startswith("ted-") else 1))
+    elif _rag_sort == "🇪🇺 Unijne najpierw":
+        _rag_rows.sort(key=lambda r: (0 if r["object_id"].startswith("ted-") else 1))
+    elif _rag_sort == "📋 Typ zamówienia":
+        _rag_rows.sort(key=lambda r: r["tender_type"] or "")
 
-            for _nr in _rag_rows:
-                render_notice(_nr, conn, _rag_ignored, key_prefix="rag_", flat=True)
+    with _count_col:
+        st.caption(f"**{len(_rag_rows)} ogłoszeń**")
+
+    for _nr in _rag_rows:
+        render_notice(_nr, conn, _rag_ignored, key_prefix="rag_")
+
 
 
 st.divider()
