@@ -21,6 +21,7 @@ from ted_client import extract_text_from_ted_xml, fetch_ted_xml
 
 
 def _get_ted_body(object_id: str, client: httpx.Client) -> str:
+    """Selekcyjny parser XML — do streszczenia strukturalnego."""
     pub_number = object_id.removeprefix("ted-")
     if not pub_number:
         return ""
@@ -32,8 +33,33 @@ def _get_ted_body(object_id: str, client: httpx.Client) -> str:
     body = extract_text_from_ted_xml(xml_text, lang="POL")
     if not body:
         body = extract_text_from_ted_xml(xml_text, lang="ENG")
-    print(f"    📄 Wyciągnięto {len(body)} znaków z XML")
+    print(f"    📄 Wyciągnięto {len(body)} znaków z XML (selekcyjny)")
     return body
+
+
+def _get_ted_body_full(object_id: str, client: httpx.Client) -> str:
+    """Pełny tekst XML — do streszczenia szczegółowego."""
+    import xml.etree.ElementTree as ET
+    pub_number = object_id.removeprefix("ted-")
+    if not pub_number:
+        return ""
+    xml_text = fetch_ted_xml(pub_number, client=client)
+    if not xml_text:
+        return ""
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        return ""
+    parts, seen = [], set()
+    for el in root.iter():
+        if el.get("languageID") == "POL" and el.text and el.text.strip():
+            t = el.text.strip()
+            if t[:80] not in seen:
+                seen.add(t[:80])
+                parts.append(t)
+    text = "\n\n".join(parts)
+    print(f"    📄 Wyciągnięto {len(text)} znaków z XML (pełny)")
+    return text
 
 
 def _get_bzp_body(object_id: str, client: httpx.Client) -> str:
@@ -160,13 +186,20 @@ def main():
             print(f"\n  [{i+1}/{len(rows)}] {object_id} | {title}")
             print(f"    struct={'✓' if has_struct else '✗'}  detail={'✓' if has_detail else '✗'}")
 
-            # Pobierz treść tylko gdy potrzeba (jedno lub drugie streszczenie brakuje)
-            body = ""
+            # Pobierz treść — osobno dla strukturalnego i szczegółowego
+            body = ""       # selekcyjny — do strukturalnego
+            body_full = ""  # pełny XML/HTML — do szczegółowego
+
             if not has_struct or not has_detail:
                 if object_id.startswith("ted-"):
-                    body = _get_ted_body(object_id, http_client)
+                    if not has_struct:
+                        body = _get_ted_body(object_id, http_client)
+                    if not has_detail:
+                        body_full = _get_ted_body_full(object_id, http_client)
                 else:
+                    # BZP — ta sama treść HTML dla obu
                     body = _get_bzp_body(object_id, http_client)
+                    body_full = body
 
             # ── Streszczenie strukturalne ──
             if not has_struct:
@@ -192,15 +225,15 @@ def main():
             # ── Streszczenie szczegółowe ──
             if not has_detail:
                 try:
-                    if not body:
+                    if not body_full:
                         # Mogło nie być pobrane (struct już istniała)
                         if object_id.startswith("ted-"):
-                            body = _get_ted_body(object_id, http_client)
+                            body_full = _get_ted_body_full(object_id, http_client)
                         else:
-                            body = _get_bzp_body(object_id, http_client)
+                            body_full = _get_bzp_body(object_id, http_client)
 
-                    if body.strip():
-                        detail = detailed_summary_text(body, backend=backend)
+                    if body_full.strip():
+                        detail = detailed_summary_text(body_full, backend=backend)
                         upsert_detailed(db_path, object_id, r["profile_name"],
                                         detail, model_label)
                         ok_detail += 1
