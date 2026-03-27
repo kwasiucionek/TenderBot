@@ -50,15 +50,35 @@ def _get_ted_body_full(object_id: str, client: httpx.Client) -> str:
         root = ET.fromstring(xml_text)
     except ET.ParseError:
         return ""
+
+    def _extract_lang(lang):
+        parts, seen = [], set()
+        for el in root.iter():
+            if el.get("languageID") == lang and el.text and el.text.strip():
+                t = el.text.strip()
+                if t[:80] not in seen:
+                    seen.add(t[:80])
+                    parts.append(t)
+        return "\n\n".join(parts)
+
+    # Próbuj POL → ENG → pierwszy dostępny język
+    for lang in ("POL", "ENG"):
+        text = _extract_lang(lang)
+        if text:
+            print(f"    📄 Wyciągnięto {len(text)} znaków z XML (pełny, {lang})")
+            return text
+
+    # Ostatni fallback — jakikolwiek język
     parts, seen = [], set()
     for el in root.iter():
-        if el.get("languageID") == "POL" and el.text and el.text.strip():
+        if el.get("languageID") and el.text and el.text.strip():
             t = el.text.strip()
             if t[:80] not in seen:
                 seen.add(t[:80])
                 parts.append(t)
     text = "\n\n".join(parts)
-    print(f"    📄 Wyciągnięto {len(text)} znaków z XML (pełny)")
+    if text:
+        print(f"    📄 Wyciągnięto {len(text)} znaków z XML (pełny, fallback)")
     return text
 
 
