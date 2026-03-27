@@ -107,10 +107,88 @@ def _sanitize_query(query: str) -> str:
     return q or query
 
 
+# Polskie słowa funkcyjne które nie mają wartości w FTS
+_STOP_WORDS = {
+    "znajdź", "znajdz", "szukaj", "pokaż", "pokaz", "wyświetl", "wyswietl",
+    "jakie", "które", "ktore", "jaki", "jaka", "jakich", "którym", "ktorym",
+    "ogłoszenia", "ogloszenia", "ogłoszenie", "ogloszenie", "przetargi",
+    "przetarg", "zamówienia", "zamowienia", "zamówienie", "zamowienie",
+    "dotyczące", "dotyczace", "dotyczący", "dotyczacy", "dotyczą", "dotycza",
+    "dotyczących", "dotyczacych", "dotyczącym", "dotyczacym",
+    "związane", "zwiazane", "związany", "zwiazany", "związanych", "zwiazanych",
+    "odnoszące", "odnoszace", "obejmujące", "obejmujace",
+    "wszystkie", "wszystko", "każde", "kazde", "oraz", "albo", "lub", "ale",
+    "więcej", "wiecej", "mniej", "lista", "listę", "liste", "zestawienie",
+    "informacje", "informację", "informacje", "dane", "temat", "temacie",
+    "zakresie", "obszarze", "dziedzinie", "branży", "branzy",
+    "dla", "przez", "przy", "pod", "nad", "między", "miedzy", "wobec",
+    "jest", "są", "sa", "będą", "beda", "mają", "maja", "mogą", "moga",
+    "można", "mozna", "trzeba", "należy", "nalezy", "warto",
+    "chcę", "chce", "chciałbym", "chcialbym", "proszę", "prosze",
+    "podaj", "pokaż", "pokaz", "daj", "wylistuj", "zobaczyć", "zobaczyc",
+    "sprawdź", "sprawdz", "przeszukaj", "wyszukaj",
+}
+
+
+def _llm_extract_keywords(question: str, backend: str) -> str:
+    """
+    Używa LLM żeby wyciągnąć słowa kluczowe do wyszukiwania FTS z pytania.
+    Zwraca kilka wariantów słów kluczowych oddzielonych spacją.
+    """
+    system = (
+        "Jesteś pomocnikiem do wyszukiwania przetargów. "
+        "Wypisz TYLKO słowa kluczowe do wyszukiwania FTS — bez żadnych wyjaśnień. "
+        "Podaj bazowe formy słów (mianownik), max 5 słów, oddzielone spacją. "
+        "Pomiń przyimki, spójniki i słowa ogólne jak 'ogłoszenie', 'przetarg'. "
+        "/no_think"
+    )
+    user = f"Pytanie: {question}\nSłowa kluczowe:"
+
+    try:
+        if backend == "ollama":
+            from ollama import Client as OllamaClient
+            host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+            model = os.getenv("OLLAMA_MODEL", "kimi-k2.5:cloud")
+            api_key = os.getenv("OLLAMA_API_KEY", "")
+            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+            client = OllamaClient(host=host, headers=headers)
+            resp = client.chat(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                options={"temperature": 0.0},
+            )
+            kw = resp["message"]["content"]
+        elif backend == "gemini":
+            from google import genai
+            client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY", ""))
+            resp = client.models.generate_content(
+                model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+                contents=system + "\n\n" + user,
+            )
+            kw = getattr(resp, "text", "") or ""
+        else:
+            return _sanitize_query(question)
+
+        # Wyczyść odpowiedź
+        kw = re.sub(r"<think>[\s\S]*?</think>", "", kw).strip()
+        kw = re.sub(r"<think>[\s\S]*", "", kw).strip()
+        kw = re.sub(r"[^\w\s\-]", " ", kw)
+        kw = re.sub(r"\s+", " ", kw).strip()
+        # Dodaj * do każdego słowa dla prefix matching (obsługa odmian)
+        words = kw.split()
+        kw = " ".join(w + "*" if not w.endswith("*") else w for w in words if w)
+        return kw if kw else _sanitize_query(question)
+
+    except Exception:
+        return _sanitize_query(question)  # fallback na stary sposób
+
+
 def search_fts(db_path: str, query: str, top_n: int = 6) -> List[dict]:
     """
-    Przeszukuje FTS5. Przy braku wyników próbuje pojedyncze słowa,
-    a następnie LIKE fallback na notices + summaries.
+    Przeszukuje FTS5. query powinno być już przetworzone (słowa kluczowe).
     """
     conn = _conn(db_path)
 
@@ -126,10 +204,17 @@ def search_fts(db_path: str, query: str, top_n: int = 6) -> List[dict]:
     safe_q = _sanitize_query(query)
     fts_rows = []
 
-    # Próba 1: pełne zapytanie FTS
+    # Próba 1: pełne zapytanie FTS z wagami kolumn
+    # bm25(tabela, w1, w2, ...) — wagi per kolumna w kolejności z CREATE
+    # Kolejność: object_id, order_object, organization_name, title, scope,
+    #            lots, participation_conditions, evaluation_criteria,
+    #            risks_and_flags, estimated_value, execution_period,
+    #            eu_funding, detailed_text
+    # Boost: order_object=10, title=10, scope=3, reszta=1
     try:
         fts_rows = conn.execute("""
-            SELECT object_id, order_object, organization_name, rank
+            SELECT object_id, order_object, organization_name,
+                   bm25(summaries_fts, 0, 10, 1, 10, 3, 2, 2, 2, 2, 1, 1, 1, 1) as rank
             FROM summaries_fts
             WHERE summaries_fts MATCH ?
             ORDER BY rank
@@ -138,24 +223,7 @@ def search_fts(db_path: str, query: str, top_n: int = 6) -> List[dict]:
     except sqlite3.OperationalError:
         pass
 
-    # Próba 2: pojedyncze słowa
-    if not fts_rows:
-        words = [w for w in safe_q.split() if len(w) >= 3]
-        for word in words:
-            try:
-                fts_rows = conn.execute("""
-                    SELECT object_id, order_object, organization_name, rank
-                    FROM summaries_fts
-                    WHERE summaries_fts MATCH ?
-                    ORDER BY rank
-                    LIMIT ?
-                """, (word, top_n)).fetchall()
-                if fts_rows:
-                    break
-            except sqlite3.OperationalError:
-                continue
-
-    # Próba 3: LIKE fallback na notices + summaries
+    # Próba 2: LIKE fallback na notices + summaries
     if not fts_rows:
         words = [w for w in safe_q.split() if len(w) >= 4]
         like_rows = []
@@ -268,7 +336,14 @@ def ask(
 ) -> tuple[str, List[dict]]:
     """Główna funkcja RAG. Zwraca (odpowiedź_llm, lista_wyników_fts)."""
 
-    results = search_fts(db_path, question, top_n=top_n)
+    chosen = (backend or os.getenv("TENDERBOT_LLM_BACKEND", "ollama")).lower()
+
+    # Krok 1: LLM wyciąga słowa kluczowe z pytania
+    fts_query = _llm_extract_keywords(question, chosen)
+    print(f"    🔍 FTS query: {fts_query!r}")
+
+    # Krok 2: Wyszukaj w FTS
+    results = search_fts(db_path, fts_query, top_n=top_n)
     if not results:
         return (
             "Nie znaleziono pasujących ogłoszeń. "
@@ -278,7 +353,6 @@ def ask(
 
     context = build_context(results)
     user_msg = f"PYTANIE: {question}\n\nKONTEKST:\n\n{context}"
-    chosen = (backend or os.getenv("TENDERBOT_LLM_BACKEND", "ollama")).lower()
 
     if chosen == "ollama":
         try:

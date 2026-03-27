@@ -1246,7 +1246,7 @@ with st.expander("🔍 Zapytaj o ogłoszenia (RAG)", expanded=True):
                 rag_answer, rag_hits = ask(
                     db_path=DB,
                     question=rag_question.strip(),
-                    top_n=999,
+                    top_n=15,
                     backend=_rag_backend,
                 )
             except Exception as e:
