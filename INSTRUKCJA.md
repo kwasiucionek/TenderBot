@@ -8,12 +8,13 @@
 4. [Profile filtrów](#4-profile-filtrów)
 5. [Monitor — pobieranie ogłoszeń](#5-monitor--pobieranie-ogłoszeń)
 6. [Streszczenia AI](#6-streszczenia-ai)
-7. [Panel główny — przeglądanie ogłoszeń](#7-panel-główny--przeglądanie-ogłoszeń)
-8. [Oznaczanie ogłoszeń](#8-oznaczanie-ogłoszeń)
-9. [Ignorowanie kodów CPV](#9-ignorowanie-kodów-cpv)
-10. [Typowy workflow](#10-typowy-workflow)
-11. [Zaawansowane — linia poleceń](#11-zaawansowane--linia-poleceń)
-12. [Rozwiązywanie problemów](#12-rozwiązywanie-problemów)
+7. [RAG — wyszukiwanie semantyczne](#7-rag--wyszukiwanie-semantyczne)
+8. [Panel główny — przeglądanie ogłoszeń](#8-panel-główny--przeglądanie-ogłoszeń)
+9. [Oznaczanie ogłoszeń](#9-oznaczanie-ogłoszeń)
+10. [Ignorowanie kodów CPV](#10-ignorowanie-kodów-cpv)
+11. [Typowy workflow](#11-typowy-workflow)
+12. [Zaawansowane — linia poleceń](#12-zaawansowane--linia-poleceń)
+13. [Rozwiązywanie problemów](#13-rozwiązywanie-problemów)
 
 ---
 
@@ -65,10 +66,11 @@ Aplikacja składa się z dwóch głównych części:
 - Zarządzanie profilami filtrów
 - Lista ignorowanych kodów CPV
 
-**Panel główny** — centralny:
-- Pasek filtrów (procedura, profil, status, keywords, oznaczenie, szukaj, ignorowane CPV)
-- Statystyki (metryki)
-- Lista ogłoszeń z możliwością rozwinięcia szczegółów
+**Panel główny** — centralny, dwie zwijane sekcje:
+- **🔍 Zapytaj o ogłoszenia (RAG)** — wyszukiwanie semantyczne z odpowiedzią AI
+- **Filtry i lista ogłoszeń** — pasek filtrów, statystyki, lista ogłoszeń
+
+Obie sekcje można zwijać i rozwijać klikając nagłówek.
 
 ---
 
@@ -78,24 +80,24 @@ Aplikacja składa się z dwóch głównych części:
 
 Na górze sidebara znajdują się:
 
-- **Godzin wstecz** — ile godzin wstecz od teraz szukać ogłoszeń. Domyślnie 168 (7 dni). Zmniejsz do np. 24 dla szybszego sprawdzenia, zwiększ do 720 (30 dni) dla szerszego zakresu.
+- **Dni wstecz** — ile dni wstecz od teraz szukać ogłoszeń. Domyślnie 7 dni. Zmniejsz do 1–2 dla szybszego sprawdzenia, zwiększ do 30 dla szerszego zakresu.
 
 - **Streszczenia na raz** — ile ogłoszeń streszczać w jednym uruchomieniu (domyślnie 10, max 500).
 
 - **▶️ Monitor** — uruchamia `monitor.py`, który pobiera ogłoszenia z Board/Search i TED zgodnie z aktywnym profilem.
 
-- **🧠 Summarize** — uruchamia `summarize.py`, który generuje krótkie streszczenia strukturalne AI dla ogłoszeń, które jeszcze ich nie mają.
+- **🧠 Summarize** — uruchamia `summarize.py`, który generuje **oba poziomy streszczeń** (strukturalne + szczegółowe) dla nieodrzuconych ogłoszeń, którym brakuje któregokolwiek z nich. Po zakończeniu automatycznie przebudowuje indeks FTS dla RAG.
 
-Logi z obu jobów wyświetlane są **na żywo** w sidebarze — widzisz postęp linia po linii. Po zakończeniu: ✅ (sukces) lub ❌ (błąd). Pełne logi dostępne w expanderze "📜 Ostatni log".
+Logi z obu jobów wyświetlane są **na żywo** w sidebarze. Po zakończeniu: ✅ (sukces) lub ❌ (błąd). Pełne logi dostępne w expanderze "📜 Ostatni log".
 
 ### Konfiguracja modelu AI
 
 W expanderze **🤖 Model AI (streszczenia)** wybierasz backend:
 
 **Ollama (domyślne)**:
-- Model: nazwa modelu dostępnego na serwerze Ollama, np. `kimi-k2.5:cloud`, `qwen3:32b`, `llama3.1:8b`
 - Host: adres serwera Ollama, np. `http://localhost:11434`
 - API Key: klucz autoryzacji (wymagany dla modeli cloud)
+- Model: wybierany z **listy dostępnych modeli** (dropdown ładowany z serwera Ollama). Jeśli Ollama niedostępna — pole tekstowe jako fallback.
 
 Aby pobrać model cloud:
 ```bash
@@ -107,7 +109,7 @@ ollama pull qwen3:32b
 - Model: np. `gemini-2.5-flash`
 - API Key: klucz z Google AI Studio (https://aistudio.google.com/apikey)
 
-Ustawienia z sidebara są przekazywane zarówno do batch streszczeń (🧠 Summarize) jak i streszczeń szczegółowych (📋 Szczegółowe).
+Ustawienia z sidebara są przekazywane zarówno do batch streszczeń (🧠 Summarize) jak i ręcznego poprawiania streszczenia (✍️ Popraw streszczenie).
 
 ---
 
@@ -120,6 +122,10 @@ Profil definiuje jakie ogłoszenia chcesz monitorować. Możesz mieć wiele prof
 1. W sidebarze wybierz **➕ Nowy profil** z listy rozwijanej
 2. Wpisz **nazwę profilu** (musi być unikalna)
 3. Zaznacz **Aktywny** (tylko aktywne profile są używane przez Monitor)
+
+### Typ zamówienia
+
+Multiselect z opcjami: **Usługi**, **Dostawy**, **Roboty budowlane**. Puste = wszystkie typy. Wpływa zarówno na zapytania do Board/Search (parametr `OrderType`) jak i TED (`contract-nature`).
 
 ### Kody CPV
 
@@ -148,19 +154,6 @@ Widoczne tylko gdy Polska jest wybrana w krajach. Filtruje polskie ogłoszenia p
 
 Filtr działa zarówno na Board/Search (parametr API + filtr lokalny) jak i TED (kody NUTS2, np. PL02 → PL51).
 
-### Słowa kluczowe (Keywords)
-
-Keywords **nie filtrują** — służą do **tagowania**. Ogłoszenie pasujące do keyword dostaje tag 🏷️ i można je potem filtrować w panelu głównym.
-
-Wpisz jedno słowo kluczowe per linia, np.:
-```
-fundusze UE
-KPO
-EFRR
-rozpoznawanie tablic
-ANPR
-```
-
 ### Zapis profilu
 
 Kliknij **💾 Zapisz**. Profil zostanie zapisany w bazie. Na dole sidebara widać podsumowanie wszystkich profili z liczbą kodów CPV, województwami i krajami.
@@ -176,17 +169,15 @@ Wybierz istniejący profil z listy → zmień ustawienia → **💾 Zapisz**. Lu
 Po kliknięciu **▶️ Monitor** system:
 
 1. Ładuje aktywne profile z bazy
-2. Pomija ogłoszenia oznaczone jako ❌ (dismissed)
-3. **Board/Search** (tylko gdy profil obejmuje Polskę):
+2. **Board/Search** (tylko gdy profil obejmuje Polskę):
    - Wysyła zapytania do API ezamowienia.gov.pl
-   - Osobne zapytania dla krajowych (is_below_eu=true) i unijnych (is_below_eu=false)
+   - Osobne zapytania per typ zamówienia (Services/Supplies/Works) i per CPV
    - Filtruje lokalnie po CPV i województwie
-4. **TED API** (dla wszystkich wybranych krajów):
-   - Wysyła zapytanie do TED Search API v3
-   - Filtruje po krajach, CPV, regionach NUTS i dacie
-5. Deduplikuje wyniki (ten sam object_id nie jest zapisywany dwa razy)
-6. Zapisuje nowe/zmienione ogłoszenia do bazy
-7. Taguje keyword_hit
+3. **TED API** (dla wszystkich wybranych krajów):
+   - Wysyła zapytanie do TED Search API v3 z filtrem `contract-nature`
+   - Mapuje typ zamówienia z listy per lot (wartość dominująca)
+4. Deduplikuje wyniki (ten sam object_id nie jest zapisywany dwa razy)
+5. Zapisuje nowe/zmienione ogłoszenia do bazy
 
 Postęp widoczny na żywo w sidebarze:
 ```
@@ -198,127 +189,128 @@ Postęp widoczny na żywo w sidebarze:
 
 ### Logi diagnostyczne
 
-Ustaw `TENDERBOT_DEBUG=1` w zmiennych środowiskowych żeby zobaczyć:
-- Każde zapytanie API
-- Pominięte ogłoszenia (CPV/województwo)
-- Fingerprint zmian
+Ustaw `TENDERBOT_DEBUG=1` w zmiennych środowiskowych żeby zobaczyć szczegółowe logi każdego zapytania API.
 
 ---
 
 ## 6. Streszczenia AI
 
-TenderBot oferuje dwa poziomy streszczeń:
+TenderBot oferuje dwa poziomy streszczeń, generowane **automatycznie w jednym przebiegu** przez **🧠 Summarize**:
 
-### Poziom 1: Streszczenie strukturalne (batch)
+### Poziom 1: Streszczenie strukturalne
 
-Uruchamiane przyciskiem **🧠 Summarize**. Przetwarza wiele ogłoszeń na raz.
-
-Dla ogłoszeń TED automatycznie pobiera XML z serwera TED i parsuje kluczowe tagi eForms (opis przedmiotu, kryteria oceny, warunki udziału, finansowanie UE, czas realizacji, wadium). Dla BZP używa treści HTML z bazy.
-
-Wynik to JSON z polami:
+Generowane batch dla wszystkich ogłoszeń bez streszczenia (lub ze starym). Wynik to JSON z polami:
 - **Przedmiot** (`scope`) — 2-3 zdania o tym co kupujesz
 - **Części zamówienia** (`lots`) — lista z opisami i wartościami
 - **Szacunkowa wartość** (`estimated_value`)
 - **Czas realizacji** (`execution_period`) — np. "21 dni", "12 miesięcy"
 - **Wadium** (`deposit_required`) — kwota/procent lub "nie wymagane"
-- **Warunki udziału** (`participation_conditions`) — zdolność finansowa, doświadczenie, kadra (bez boilerplate PZP art. 108/109)
+- **Warunki udziału** (`participation_conditions`) — zdolność finansowa, doświadczenie, kadra
 - **Kryteria oceny** (`evaluation_criteria`) — z wagami, np. "Cena 60%"
-- **Finansowanie UE** (`eu_funding`) — nazwa programu, np. "Fundusze Europejskie dla Wielkopolski 2021-2027"
+- **Finansowanie UE** (`eu_funding`) — nazwa programu
 - **Ryzyka / flagi** (`risks_and_flags`) — realne ryzyka dla oferenta
 
-Wyświetlane w zakładce **🧠 Streszczenie** po rozwinięciu ogłoszenia. Surowy JSON dostępny w zakładce **📋 JSON**.
+Wyświetlane w zakładce **🧠 Streszczenie** po rozwinięciu ogłoszenia. Surowy JSON w zakładce **📋 JSON**.
 
-### Poziom 2: Streszczenie szczegółowe (per ogłoszenie)
+### Poziom 2: Streszczenie szczegółowe
 
-Uruchamiane przyciskiem **📋 Szczegółowe** w wierszu linków ogłoszenia. Działa na żądanie dla jednego ogłoszenia.
+Generowane batch dla ogłoszeń bez `detailed_text` (w tym samym przebiegu co strukturalne). Pobiera pełną treść (XML z TED lub HTML z BZP) i wysyła do LLM bez schematu — model sam formatuje wynik z nagłówkami.
 
-Pobiera **pełną treść** (XML z TED lub HTML z BZP) i wysyła do modelu LLM bez wymuszania schematu JSON — model sam decyduje co jest najważniejsze i formatuje wynik jako czytelny tekst z nagłówkami.
+Wyświetlane w zakładce **📋 Szczegółowe**.
 
-Wynik zapisywany w bazie (kolumna `detailed_text`) — przetrwa odświeżenie strony. Wyświetlany w zakładce **📋 Szczegółowe** obok streszczenia strukturalnego.
+### Ręczne poprawianie
 
-### Kiedy co używać
+Przycisk **✍️ Popraw streszczenie** w każdym ogłoszeniu — regeneruje szczegółowe streszczenie na żądanie, nadpisując istniejące. Przydatne gdy chcesz użyć lepszego/innego modelu dla wybranego ogłoszenia.
 
-| Potrzeba | Narzędzie |
-|---|---|
-| Szybki przegląd wielu ogłoszeń | 🧠 Summarize (batch) |
-| Dogłębna analiza konkretnego ogłoszenia | 📋 Szczegółowe (per ogłoszenie) |
-| Pełna treść oryginalna | 🔗 Ogłoszenie (link do źródła) |
+### Logika Summarize
+
+- Pomija ogłoszenia oznaczone jako ❌ (dismissed)
+- Dla każdego ogłoszenia sprawdza osobno: brak strukturalnego? brak szczegółowego?
+- Treść (XML/HTML) pobierana raz, używana do obu streszczeń
+- Po zakończeniu automatycznie przebudowuje indeks FTS dla RAG
 
 ---
 
-## 7. Panel główny — przeglądanie ogłoszeń
+## 7. RAG — wyszukiwanie semantyczne
 
-### Pasek filtrów
+Sekcja **🔍 Zapytaj o ogłoszenia (RAG)** umożliwia przeszukiwanie bazy streszczeń pytaniem w języku naturalnym.
 
-Na górze panelu głównego:
+### Jak działa
 
-| Filtr | Opcje | Opis |
-|---|---|---|
-| Procedura | Wszystkie / Krajowe (BZP) / Unijne (TED) | Rodzaj procedury zamówieniowej |
-| Profil | Wszystkie / nazwa profilu | Filtr po profilu, z którego pochodzi ogłoszenie |
-| Status | Wszystkie / Otwarte / Zakończone | Otwarte = deadline w przyszłości (**obliczane na żywo**, nie zapisywane w bazie) |
-| Keywords | Wszystkie / Tylko z keyword / Bez keyword | Filtr po tagach 🏷️ |
-| Oznaczenie | Aktywne / ⭐ Wybrane / ❌ Odrzucone / Wszystkie | Filtr po oznaczeniu użytkownika |
-| Szukaj | tekst | Wyszukiwanie w tytule i nazwie organizacji |
+1. Pytanie jest zamieniane na zapytanie FTS5 (SQLite Full-Text Search)
+2. System zwraca najbardziej pasujące streszczenia
+3. LLM generuje odpowiedź na podstawie znalezionych fragmentów
+4. Pod odpowiedzią wyświetlane są źródłowe ogłoszenia (identycznie jak na liście)
 
-Dodatkowo checkbox **🚫 Ukryj ignorowane CPV** (domyślnie włączony) — ukrywa ogłoszenia zawierające ignorowane kody CPV.
+### Użycie
 
-Domyślny filtr statusu to **Otwarte** — ogłoszenie z deadline 2026-03-25 pojawi się tu do 25 marca, potem automatycznie przejdzie do "Zakończone" bez żadnej aktualizacji bazy.
+1. Wpisz pytanie w polu tekstowym, np.:
+   - *"Jakie ogłoszenia dotyczą rozpoznawania tablic rejestracyjnych?"*
+   - *"Znajdź przetargi z finansowaniem z KPO"*
+   - *"Które ogłoszenia wymagają doświadczenia z systemami AI?"*
+2. Kliknij **🔍 Szukaj**
+3. Przeczytaj odpowiedź LLM
+4. Przejrzyj źródłowe ogłoszenia poniżej (zwijane)
+
+### Opcje
+
+- **Uwzględnij zakończone** — checkbox; domyślnie RAG zwraca tylko ogłoszenia z aktywnym deadline
+- **Sortuj źródła** — selectbox z opcjami: trafność, deadline, data publikacji, oznaczone najpierw, krajowe/unijne najpierw, typ zamówienia
+- **🔄 Przebuduj indeks FTS** — ręczna przebudowa indeksu (normalnie dzieje się automatycznie po Summarize)
+
+### Jakość wyników
+
+RAG działa na streszczeniach AI — im więcej ogłoszeń ma wygenerowane streszczenia, tym lepsze wyniki. Uruchom **🧠 Summarize** przed korzystaniem z RAG.
+
+---
+
+## 8. Panel główny — przeglądanie ogłoszeń
+
+### Filtry (pasek nad listą)
+
+| Filtr | Opis |
+|---|---|
+| **Procedura** | Wszystkie / Krajowe (BZP) / Unijne (TED) |
+| **Profil** | Filtruje po profilu z którego pochodzi ogłoszenie |
+| **Status** | Wszystkie / Otwarte (deadline w przyszłości) / Zakończone |
+| **Oznaczenie** | Aktywne (nowe+wybrane) / ⭐ Wybrane / ❌ Odrzucone |
+| **Typ zamówienia** | Wszystkie / Usługi / Dostawy / Roboty budowlane |
+| **🔍 Szukaj** | Wyszukiwanie tekstowe po tytule i nazwie org. |
+| **🚫 Ukryj ignorowane CPV** | Checkbox; ukrywa ogłoszenia z ignorowanymi kodami |
 
 ### Metryki
 
-Wiersz z liczbami:
-- **Ogłoszenia** — łącznie (po filtrach)
-- **🇵🇱 Krajowe** — procedura krajowa (BZP)
-- **🇪🇺 Unijne** — procedura unijna (TED)
-- **🏷️ Keyword** — z trafieniem keyword
-- **⭐ Wybrane** — oznaczone przez użytkownika
-- **❌ Odrzucone** — odrzucone przez użytkownika
-- **🧠 Streszczenia** — z gotowym streszczeniem AI
+Powyżej listy widoczne liczniki: ogłoszenia ogółem, krajowe, unijne, wybrane, odrzucone, ze streszczeniami.
 
-### Lista ogłoszeń
+### Ogłoszenie (zwinięte)
 
-Każde ogłoszenie wyświetlane jest jako expander z nagłówkiem:
+Nagłówek: `🇵🇱/🇪🇺 ⭐ 🧠 **Tytuł ogłoszenia**`
+Pod spodem: numer · organizacja · deadline (Xd)
 
-```
-🇪🇺 ⭐🏷️ 🧠 Tytuł ogłoszenia...
-103647-2026 · Nazwa Zamawiającego · ⏰ 2026-03-15 (5d)
-```
+Kliknij nagłówek żeby rozwinąć szczegóły.
 
-Znaczenie ikon:
-- 🇵🇱 / 🇪🇺 — krajowe / unijne
-- ⭐ — oznaczone jako wybrane
-- 🏷️ — trafienie keyword
-- 🧠 — ma streszczenie AI
-- ⏰ — deadline w przyszłości (z liczbą dni)
-- ❌ — deadline minął
+### Ogłoszenie (rozwinięte)
 
-Po rozwinięciu widzisz:
-
-**Rząd linków i akcji:**
-```
-[🔗 Ogłoszenie] [📂 Postępowanie] [📄 PDF (TED)] [📋 Szczegółowe]
-```
-
-- **🔗 Ogłoszenie** — link do pełnej treści (ezamowienia.gov.pl dla BZP, ted.europa.eu dla TED)
-- **📂 Postępowanie** — link do platformy e-zamówień (jeśli dostępne)
-- **📄 PDF (TED)** — PDF ogłoszenia na TED (jeśli dostępne)
-- **📋 Szczegółowe** — generuje szczegółowe streszczenie AI (pełna treść). Po wygenerowaniu pokazuje "✅ gotowe"
+**Linki (4 kolumny):**
+- 🔗 Ogłoszenie — strona źródłowa
+- 📂 Postępowanie — link do postępowania (BZP)
+- 📄 PDF — plik PDF (TED)
+- ✍️ Popraw streszczenie — ręczna regeneracja szczegółowego streszczenia
 
 **Przyciski akcji:** ⭐ Wybierz / ❌ Odrzuć / ↩ Cofnij
 
-**Kody CPV:** każdy kod osobno z opisem i przyciskiem 🚫 do ignorowania. Już ignorowane kody wyświetlane jako ~~przekreślone~~.
+**Kody CPV:** każdy kod osobno z opisem i przyciskiem 🚫 do ignorowania. Już ignorowane wyświetlane jako ~~przekreślone~~.
 
 **Meta:** województwo, typ ogłoszenia, profil
 
 **Streszczenia AI** (zakładki, pojawiają się gdy dostępne):
 - **🧠 Streszczenie** — strukturalne (warunki, kryteria, ryzyka...)
 - **📋 JSON** — surowe dane JSON
-- **📋 Szczegółowe** — pełne streszczenie wolnym tekstem (po kliknięciu przycisku)
+- **📋 Szczegółowe** — pełne streszczenie wolnym tekstem
 
 ---
 
-## 8. Oznaczanie ogłoszeń
+## 9. Oznaczanie ogłoszeń
 
 Każde ogłoszenie ma 3 możliwe statusy:
 
@@ -330,71 +322,73 @@ Każde ogłoszenie ma 3 możliwe statusy:
 
 **Domyślnie** filtr jest ustawiony na "Aktywne" — widać nowe + wybrane, odrzucone są ukryte.
 
-**Odrzucone ogłoszenia nie są ponownie pobierane** przez Monitor — ich ID jest pomijane przy kolejnych uruchomieniach.
+**Odrzucone ogłoszenia nie są ponownie streszczane** przez Summarize i nie są ponownie pobierane przez Monitor.
 
 Przyciskami w ogłoszeniu możesz:
 - **⭐ Wybierz** → oznacza jako interesujące
-- **❌ Odrzuć** → ukrywa z domyślnego widoku i z kolejnych pobrań
+- **❌ Odrzuć** → ukrywa z domyślnego widoku i z kolejnych pobrań/streszczeń
 - **↩ Cofnij** → przywraca do stanu "nowe"
 
 ---
 
-## 9. Ignorowanie kodów CPV
+## 10. Ignorowanie kodów CPV
 
-Pozwala ukryć całe kategorie ogłoszeń, np. jeśli profil IT łapie ogłoszenia dotyczące mebli biurowych (CPV 39100000) przez szerokie zapytanie.
+Pozwala ukryć całe kategorie ogłoszeń, np. jeśli profil IT łapie ogłoszenia dotyczące sprzętu medycznego przez szerokie zapytanie `48*`.
 
 ### Ignorowanie kodu
 
 1. Rozwiń dowolne ogłoszenie
-2. W sekcji CPV zobaczysz kody z opisami, np. `39130000 — Meble biurowe`
-3. Kliknij przycisk **🚫 39130000** przy niechcianym kodzie
+2. W sekcji CPV zobaczysz kody z opisami, np. `48814000 — Systemy informacji medycznej`
+3. Kliknij przycisk **🚫 48814000** przy niechcianym kodzie
 4. Kod zostanie dodany do listy ignorowanych
 5. Ogłoszenia zawierające ten kod znikną z widoku (jeśli checkbox "Ukryj ignorowane" jest włączony)
 
 ### Zarządzanie ignorowanymi
 
-W sidebarze sekcja **🚫 Ignorowane CPV** pokazuje listę:
-```
-39130000 — Meble biurowe                [↩]
-30200000 — Urządzenia komputerowe       [↩]
-```
-
-Kliknij **↩** żeby przywrócić kod (usunąć z listy ignorowanych).
+W sidebarze sekcja **🚫 Ignorowane CPV** pokazuje listę z przyciskami ↩ do przywracania.
 
 ### Jak działa filtr
 
-Ogłoszenie jest ukrywane jeśli **jakikolwiek** z jego kodów CPV znajduje się na liście ignorowanych. Dotyczy to zarówno ogłoszeń BZP jak i TED.
+Ogłoszenie jest ukrywane jeśli **jakikolwiek** z jego kodów CPV znajduje się na liście ignorowanych. Dotyczy zarówno ogłoszeń BZP jak i TED.
 
 ---
 
-## 10. Typowy workflow
+## 11. Typowy workflow
 
 ### Przegląd nowych ogłoszeń (codziennie)
 
 1. Otwórz aplikację
 2. Kliknij **▶️ Monitor** → poczekaj na pobranie (logi na żywo)
-3. Kliknij **🧠 Summarize** → krótkie streszczenia dla nowych ogłoszeń
+3. Kliknij **🧠 Summarize** → generuje oba poziomy streszczeń + przebudowuje indeks FTS
 4. Przeglądaj listę — domyślnie otwarte, aktywne
 5. Niechciane kody CPV → 🚫 ignoruj
 6. Niechciane ogłoszenia → ❌ Odrzuć
 7. Interesujące → ⭐ Wybierz
 
+### Wyszukiwanie semantyczne (RAG)
+
+1. Rozwiń sekcję **🔍 Zapytaj o ogłoszenia (RAG)**
+2. Wpisz pytanie np. *"Jakie przetargi dotyczą parkingów i zarządzania ruchem?"*
+3. Kliknij **🔍 Szukaj** → przeczytaj odpowiedź
+4. Przejrzyj źródłowe ogłoszenia poniżej, posortuj wg deadline lub trafności
+5. Interesujące → ⭐ Wybierz
+
 ### Analiza wybranego ogłoszenia
 
 1. Filtr "⭐ Wybrane" → lista interesujących
 2. Rozwiń ogłoszenie → zakładka 🧠 Streszczenie → szybki przegląd warunków
-3. Kliknij **📋 Szczegółowe** → pełne streszczenie z XML/HTML
-4. Kliknij **🔗 Ogłoszenie** → pełna treść na stronie źródłowej
+3. Zakładka 📋 Szczegółowe → pełne streszczenie (wygenerowane automatycznie przez Summarize)
+4. Jeśli streszczenie niekompletne → **✍️ Popraw streszczenie** z lepszym modelem
+5. Kliknij **🔗 Ogłoszenie** → pełna treść na stronie źródłowej
 
 ### Poszerzenie monitoringu
 
-1. Sidebar → Profil filtrów → zmień kraje / województwa / CPV
+1. Sidebar → Profil filtrów → zmień kraje / województwa / CPV / typ zamówienia
 2. Dodaj nowy profil dla innej branży lub regionu
-3. Dodaj keywords do tagowania (np. "cyberbezpieczeństwo", "EFRR")
 
 ---
 
-## 11. Zaawansowane — linia poleceń
+## 12. Zaawansowane — linia poleceń
 
 Skrypty można uruchamiać bezpośrednio, bez Streamlit:
 
@@ -417,7 +411,7 @@ TENDERBOT_TARGET_ID=08de6a9d python monitor.py
 ### Streszczenia
 
 ```bash
-# Ollama (domyślne)
+# Ollama (domyślne) — oba poziomy streszczeń, pomija dismissed
 OLLAMA_MODEL=qwen3:32b python summarize.py
 
 # Gemini
@@ -443,30 +437,25 @@ SELECT object_id, order_object, organization_name
 FROM notices
 WHERE user_status = 'starred' AND organization_province = 'PL02';
 
--- Ogłoszenia ze streszczeniem szczegółowym
-SELECT object_id, substr(detailed_text, 1, 100)
-FROM summaries
-WHERE detailed_text IS NOT NULL;
-
--- Ignorowane CPV
-SELECT * FROM ignored_cpv;
+-- Statystyka streszczeń (strukturalne + szczegółowe)
+SELECT
+  COUNT(*) as total,
+  SUM(CASE WHEN summary_json != '{}' THEN 1 ELSE 0 END) as structured,
+  SUM(CASE WHEN detailed_text IS NOT NULL AND detailed_text != '' THEN 1 ELSE 0 END) as detailed
+FROM summaries;
 
 -- Ogłoszenia z konkretnym CPV
 SELECT object_id, order_object
 FROM notices
 WHERE cpv_code LIKE '%72253200%';
 
--- Statystyka streszczeń
-SELECT
-  COUNT(*) as total,
-  SUM(CASE WHEN summary_json != '{}' THEN 1 ELSE 0 END) as structured,
-  SUM(CASE WHEN detailed_text IS NOT NULL THEN 1 ELSE 0 END) as detailed
-FROM summaries;
+-- Ignorowane CPV
+SELECT * FROM ignored_cpv;
 ```
 
 ---
 
-## 12. Rozwiązywanie problemów
+## 13. Rozwiązywanie problemów
 
 ### "Nie wczytano słownika CPV"
 
@@ -475,9 +464,13 @@ Brak pliku `cpv_2008_ver_2013.csv` obok `app.py`. Pobierz z oficjalnego źródł
 ### Monitor nie znajduje ogłoszeń
 
 1. Sprawdź czy profil jest **Aktywny** (checkbox ✅)
-2. Sprawdź zakres "Godzin wstecz" — może być za mały
+2. Sprawdź zakres "Dni wstecz" — może być za mały
 3. Uruchom z `TENDERBOT_DEBUG=1` i sprawdź logi
-4. Sprawdź czy kody CPV pasują (72000000 to grupa, 72253200 to konkretny kod)
+4. Sprawdź czy kody CPV i typ zamówienia są prawidłowe
+
+### Filtr "Typ zamówienia" nie działa (0 wyników)
+
+Ogłoszenia pobrane starszą wersją mogą mieć `tender_type = NULL`. Uruchom Monitor ponownie — nowe ogłoszenia będą miały poprawny `tender_type`.
 
 ### Streszczenia nie działają
 
@@ -485,13 +478,12 @@ Brak pliku `cpv_2008_ver_2013.csv` obok `app.py`. Pobierz z oficjalnego źródł
 2. Sprawdź czy model jest pobrany: `ollama list`
 3. Sprawdź klucz API w panelu bocznym (🤖 Model AI)
 4. Zmień backend na Gemini jako alternatywę
-5. Sprawdź logi — jeśli model zwraca `<think>` tagi, parser je automatycznie usuwa
 
-### Streszczenie szczegółowe nie działa
+### RAG nie znajduje ogłoszeń
 
-1. Sprawdź czy Ollama/Gemini odpowiada (te same kroki co wyżej)
-2. Dla TED: sprawdź czy XML jest dostępny pod `https://ted.europa.eu/en/notice/{numer}/xml`
-3. Dla BZP: sprawdź czy `html_body` nie jest puste w bazie
+1. Sprawdź czy indeks FTS istnieje — kliknij **🔄 Przebuduj indeks FTS**
+2. Sprawdź czy ogłoszenia mają streszczenia — uruchom **🧠 Summarize** najpierw
+3. Spróbuj prostszego pytania (jedno lub dwa słowa kluczowe)
 
 ### TED zwraca 400 Bad Request
 
@@ -499,25 +491,22 @@ Brak pliku `cpv_2008_ver_2013.csv` obok `app.py`. Pobierz z oficjalnego źródł
 2. Możliwe przyczyny: nieobsługiwane pole w query, nieprawidłowy kod NUTS
 3. Wyłącz TED tymczasowo: `TENDERBOT_SKIP_TED=1`
 
-### Ogłoszenia z niewłaściwych województw
+### Ogłoszenia zniknęły po zmianie nazwy profilu
 
-Filtr województwa działa na dwóch poziomach:
-- Board/Search: parametr API + filtr lokalny (`matches_province`)
-- TED: kody NUTS2 w zapytaniu (`place-of-performance=PL51*`)
-
-Ogłoszenie bez informacji o województwie (pole puste) jest przepuszczane — lepiej za dużo niż za mało. Możesz je odrzucić ❌ ręcznie.
+Ogłoszenia w bazie mają przypisaną starą nazwę profilu. Uruchom:
+```bash
+sqlite3 data/tenderbot.sqlite "UPDATE notices SET profile_name = 'NOWA_NAZWA' WHERE profile_name = 'STARA_NAZWA';"
+sqlite3 data/tenderbot.sqlite "UPDATE summaries SET profile_name = 'NOWA_NAZWA' WHERE profile_name = 'STARA_NAZWA';"
+```
 
 ### Baza jest za duża
 
 ```bash
 # Usuń stare ogłoszenia (np. starsze niż 90 dni)
 sqlite3 data/tenderbot.sqlite "
-  DELETE FROM notices
-  WHERE publication_date < date('now', '-90 days');
-  DELETE FROM notice_state
-  WHERE object_id NOT IN (SELECT object_id FROM notices);
-  DELETE FROM summaries
-  WHERE object_id NOT IN (SELECT object_id FROM notices);
+  DELETE FROM notices WHERE publication_date < date('now', '-90 days');
+  DELETE FROM notice_state WHERE object_id NOT IN (SELECT object_id FROM notices);
+  DELETE FROM summaries WHERE object_id NOT IN (SELECT object_id FROM notices);
   VACUUM;
 "
 ```

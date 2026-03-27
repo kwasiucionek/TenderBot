@@ -1,28 +1,31 @@
 # TenderBot — Monitor Zamówień Publicznych
 
-Monitor ogłoszeń o zamówieniach publicznych z Biuletynu Zamówień Publicznych (BZP) oraz europejskiego portalu TED, z interfejsem Streamlit i dwupoziomowymi streszczeniami AI.
+Monitor ogłoszeń o zamówieniach publicznych z Biuletynu Zamówień Publicznych (BZP) oraz europejskiego portalu TED, z interfejsem Streamlit, dwupoziomowymi streszczeniami AI i wyszukiwaniem semantycznym RAG.
 
 ## Typowy workflow
 
 1. **▶️ Monitor** — pobiera ogłoszenia z BZP + TED do bazy
-2. **🧠 Summarize** — generuje krótkie streszczenia strukturalne (batch)
+2. **🧠 Summarize** — generuje oba poziomy streszczeń AI (strukturalne + szczegółowe) dla nieodrzuconych ogłoszeń
 3. Przeglądasz listę → filtrujesz, oznaczasz ⭐/❌, ignorujesz niechciane CPV
-4. **📋 Szczegółowe** — klikasz per ogłoszenie, które Cię zainteresowało (pełne streszczenie z XML/HTML)
-5. **🔗 Ogłoszenie** — otwierasz pełną treść na ezamowienia.gov.pl lub ted.europa.eu
+4. **🔍 RAG** — zadajesz pytanie po polsku, dostajesz odpowiedź z bazy streszczeń
+5. **✍️ Popraw streszczenie** — ręcznie regenerujesz szczegółowe streszczenie wybranego ogłoszenia innym modelem
+6. **🔗 Ogłoszenie** — otwierasz pełną treść na ezamowienia.gov.pl lub ted.europa.eu
 
 ## Funkcje
 
 - **Dwuźródłowy monitoring** — Board/Search API (ezamowienia.gov.pl) dla polskich ogłoszeń + TED Search API v3 dla ogłoszeń unijnych z całej UE/EOG
-- **Profile filtrów** — konfigurowalne kody CPV, województwa (NUTS2), kraje, słowa kluczowe
+- **Profile filtrów** — konfigurowalne kody CPV, województwa (NUTS2), kraje, typ zamówienia
 - **Dwupoziomowe streszczenia AI**:
   - **Strukturalne** (batch) — JSON z polami: zakres, loty, wartość, czas realizacji, wadium, warunki udziału, kryteria oceny, finansowanie UE, ryzyka
-  - **Szczegółowe** (per ogłoszenie) — wolny tekst z pełną treścią XML/HTML, bez wymuszania schematu
-- **Pobieranie XML z TED** — automatyczne pobranie i parsowanie eForms XML dla ogłoszeń unijnych (treść merytoryczna, bez boilerplate PZP)
-- **Oznaczanie ogłoszeń** — ⭐ wybrane / ❌ odrzucone, z trwałym zapisem; odrzucone pomijane przy kolejnym pobraniu
+  - **Szczegółowe** (batch + ręcznie) — wolny tekst z pełną treścią XML/HTML, bez wymuszania schematu
+- **RAG (Retrieval-Augmented Generation)** — wyszukiwanie semantyczne po streszczeniach, indeks FTS5 (SQLite), odpowiedź generowana przez LLM z sortowaniem i filtrem aktualności
+- **Wybór modelu z listy** — dropdown z dostępnymi modelami Ollama (automatyczne pobieranie listy)
+- **Pobieranie XML z TED** — automatyczne pobranie i parsowanie eForms XML dla ogłoszeń unijnych
+- **Oznaczanie ogłoszeń** — ⭐ wybrane / ❌ odrzucone; odrzucone pomijane przez Summarize i kolejne pobrania
 - **Ignorowanie CPV** — ukrywanie niechcianych kategorii z możliwością przywrócenia
-- **Filtrowanie** — procedura, status (otwarte/zakończone — obliczane na żywo), keywords, profil, oznaczenie, wyszukiwarka
+- **Filtrowanie** — procedura, status (otwarte/zakończone), typ zamówienia, profil, oznaczenie, wyszukiwarka
 - **Live logi** — postęp monitora i streszczeń w czasie rzeczywistym w sidebarze
-- **Backend LLM** — Ollama (lokalne/cloud) lub Google Gemini, konfigurowalny z UI
+- **Backend LLM** — Ollama (lokalne/cloud) lub Google Gemini, konfigurowany z UI
 
 ## Struktura projektu
 
@@ -30,8 +33,9 @@ Monitor ogłoszeń o zamówieniach publicznych z Biuletynu Zamówień Publicznyc
 tenderbot/
 ├── app.py              # Panel Streamlit (UI)
 ├── monitor.py          # Pobieranie ogłoszeń z BZP + TED
-├── summarize.py        # Batch streszczenia strukturalne
-├── ai_agent.py         # Backend LLM (Ollama / Gemini) + streszczenia szczegółowe
+├── summarize.py        # Batch streszczenia (strukturalne + szczegółowe)
+├── rag.py              # RAG — indeks FTS5, wyszukiwanie, generowanie odpowiedzi
+├── ai_agent.py         # Backend LLM (Ollama / Gemini) + streszczenia
 ├── bzp_client.py       # Klient API Board/Search (ezamowienia.gov.pl)
 ├── ted_client.py       # Klient TED Search API v3 + parser XML eForms
 ├── storage.py          # Warstwa dostępu do bazy danych
@@ -89,23 +93,24 @@ Aplikacja otworzy się na `http://localhost:8501`.
 
 ### Board/Search API (ezamowienia.gov.pl)
 - Ogłoszenia krajowe (BZP) + częściowo unijne
-- Filtr po: CPV, województwie, dacie publikacji, procedurze
+- Filtr po: CPV, województwie, dacie publikacji, typie zamówienia
 - Działa tylko dla Polski
 
 ### TED Search API v3
 - Ogłoszenia unijne ze wszystkich krajów UE/EOG
-- Filtr po: CPV, kraju (`buyer-country`), regionie NUTS (`place-of-performance`), dacie
+- Filtr po: CPV, kraju (`buyer-country`), regionie NUTS (`place-of-performance`), dacie, typie zamówienia (`contract-nature`)
 - Nie wymaga klucza API
 - Paginacja w trybie ITERATION (bez limitu 15k)
-- XML ogłoszeń pobierany na żądanie dla streszczeń szczegółowych
+- XML ogłoszeń pobierany na żądanie dla streszczeń
 
 ## Baza danych
 
 SQLite z tabelami:
-- `filter_profiles` — profile filtrów (CPV, województwa, kraje, keywords)
-- `notices` — ogłoszenia (dane, user_status ⭐/❌, keyword_hit, is_below_eu)
+- `filter_profiles` — profile filtrów (CPV, województwa, kraje, typ zamówienia)
+- `notices` — ogłoszenia (dane, user_status ⭐/❌, is_below_eu, tender_type)
 - `notice_state` — fingerprint do wykrywania zmian
 - `summaries` — streszczenia AI: `summary_json` (strukturalne) + `detailed_text` (szczegółowe)
+- `summaries_fts` — wirtualna tabela FTS5 dla RAG (przebudowywana po Summarize)
 - `ignored_cpv` — ignorowane kody CPV
 
 Migracje wykonywane automatycznie przy starcie. Status otwarte/zakończone obliczany na żywo (nie zapisywany w bazie).
