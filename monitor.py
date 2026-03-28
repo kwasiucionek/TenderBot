@@ -311,6 +311,107 @@ def load_active_profiles(db_path: str) -> List[Profile]:
 # -------------------------
 
 
+
+# ── Wzorce auto-dismiss ────────────────────────────────────────────────────────
+# Ogłoszenia pasujące do tych wzorców są automatycznie oznaczane jako dismissed
+# przy pierwszym pobraniu, bez wyświetlania na liście.
+
+_AUTO_DISMISS_TITLE = [
+    # Medyczne / szpitalne
+    r'\bHIS\b', r'\bEDM\b', r'\bRIS\b', r'\bPACS\b', r'\bAMMS\b',
+    'InfoMedica', 'Clininet', 'szpital', 'klinik', 'ZOZ', 'SPZOZ', 'SP ZOZ',
+    'medyczn', 'zdrowia', 'pacjent', 'e-zdrowie', 'radiolog',
+    'mammograf', r'\bRTG\b', 'endoskop', 'tomograf', 'mikrobiologiczn',
+    'antybiotykoterap', 'Portal Pacjenta',
+    # Edukacja / szkolenia
+    'szkoł', 'uczelni', 'uczel', 'student', 'kształcen', 'dydaktyczn',
+    'e-learning', 'Moodle', 'nauczyciel', 'modułu szkoleniowego',
+    'utbildningssystem', r'\bLMS\b',
+    # HR / kadry / płace
+    'kadrowo-płac', 'kadry i płace', 'płacowy', 'kadrowy',
+    'tijdsregistratie', 'Lohnabrechnung', r'\bpayroll\b',
+    # Geodezja / mapy
+    r'\bBDOT\b', r'\bGESUT\b', 'topograficzn', 'ewidencji gruntów',
+    'punktów granicznych', 'gruntów i budynków', 'operatu ewidencji',
+    'Pasportizácia', 'pasportizácia',
+    # Środowisko / leśnictwo / rolnictwo
+    'Lasy Państwowe', 'Państwowe Gospodarstwo Leśne', 'leśnictw', 'rolnicz',
+    'solarnego dachów', 'fotowoltaiczn',
+    # Kultura / sport / media
+    r'\bTVP\b', 'telewizj', 'emisji.*Sport',
+    'bibliotek', 'muzeum', 'teatr', 'sportow', 'basen', 'stadion', 'rekreac',
+    'imprez sportowych', 'pomiaru czasu uczestników',
+    'Bibliothèque nationale', 'Numérisation.*collections',
+    # Lokalne / komunalne
+    'pomocy społeczn', 'socjaln', 'opieki społeczn',
+    'windykacyjno', 'Strefy Płatnego Parkowania',
+    'konferencji.*realizacj',
+    # Zagraniczne lokalne
+    r'\bGemeinde\b', r'\bville de\b', r'\bStadtwerk\b', r'\bkommunal\b',
+    r'\bmunicip', 'Abwasser', r'\bSozial\b', r'\bsozial\b',
+    'Krankenhaus', 'Spital', r'\bsjukhus\b', 'hôpital', 'nemocnic',
+    r'\bškol\b', r'\bSchule\b', 'Kindergarten',
+    r'\buniversit', r'\buniversité', r'\buniversitet',
+    'votes électroniques', 'Besöksräkning',
+    r'\bWarenwirtschaft\b', 'Fahrzeug-Schlüssel',
+    r'\bTelenotarzt\b', 'Lajitteluasemien',
+    'restauration.*hygiène', 'sprzątani',
+]
+
+_AUTO_DISMISS_ORG = [
+    # Szpitale / ZOZ / kliniki polskie
+    'Szpital', 'Klinika', r'\bZOZ\b', r'\bSPZOZ\b', 'SP ZOZ',
+    'Centrum Onkologii', 'Centrum Zdrowia', 'Centrum Opieki',
+    'Opieki Zdrowotnej', 'Instytut Medyczny',
+    # Media
+    'Telewizja Polska', r'\bTVP\b',
+    # Sport
+    'Centrum Sportu', 'Centrum Spotu',
+    # Lasy
+    'Lasy Państwowe', 'Lasy Pań', 'Leśne Lasy',
+    # Zagraniczne szpitale
+    'Krankenhaus', 'Klinikum', 'Spital', 'sjukhus', 'hôpital',
+    'nemocnic', r'\bHospital\b', r'\bhospital\b',
+    'Centre Hospitalier', 'Sanitari', r'\bsanté\b',
+    # Zagraniczne uczelnie
+    'Universität', 'Université', 'Universitair', 'Universiteit',
+    'Universidad', 'Università', 'Universita', 'Universitet',
+    r'\bUniversity\b',
+    # Zagraniczne komunalne / lokalne
+    r'\bStadt\b', r'\bGemeinde\b', r'\bKommune\b', r'\bkommun\b',
+    r'\bAyuntamiento\b', r'\bMunicipio\b', r'\bMunicipali',
+    r'\bVille de\b', r'\bCommune de\b', r'\bCommunauté\b',
+    'Stadsmiljö', 'Stadsverwaltung',
+    # Zagraniczne koleje / transport lokalny (spoza ITS)
+    'Bundesbahnen', 'Staatsbahnen',
+    r'\bHKL\b',  # Helsinki transport
+    # Zagraniczne odpady / środowisko
+    'Entsorgung', r'\bAbfall\b',
+    # Zagraniczne ubezpieczenia społeczne
+    'Sozialversicherung', 'Försäkring',
+]
+
+
+def should_auto_dismiss(notice: Dict[str, Any]) -> bool:
+    """
+    Sprawdza czy ogłoszenie powinno być automatycznie odrzucone
+    na podstawie tytułu lub nazwy organizacji.
+    Zwraca True jeśli ogłoszenie pasuje do któregokolwiek wzorca.
+    """
+    title = (notice.get('orderObject') or notice.get('order_object') or '').lower()
+    org = (notice.get('organizationName') or notice.get('organization_name') or '').lower()
+
+    for pattern in _AUTO_DISMISS_TITLE:
+        if re.search(pattern.lower(), title):
+            return True
+
+    for pattern in _AUTO_DISMISS_ORG:
+        if re.search(pattern.lower(), org):
+            return True
+
+    return False
+
+
 def fingerprint_notice(notice: Dict[str, Any]) -> str:
     payload = {
         "objectId": notice.get("objectId"),
@@ -379,8 +480,8 @@ def upsert_notice_and_state(
             object_id, profile_name, publication_date, notice_number, bzp_number,
             submitting_offers_date, cpv_code, organization_name, organization_city,
             organization_province, order_object, notice_type, tender_type,
-            payload_json, updated_at, tender_id, is_below_eu
-        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            payload_json, updated_at, tender_id, is_below_eu, user_status
+        ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(object_id) DO UPDATE SET
             profile_name=excluded.profile_name,
             publication_date=excluded.publication_date,
@@ -397,7 +498,11 @@ def upsert_notice_and_state(
             payload_json=excluded.payload_json,
             updated_at=excluded.updated_at,
             tender_id=excluded.tender_id,
-            is_below_eu=excluded.is_below_eu
+            is_below_eu=excluded.is_below_eu,
+            user_status=CASE
+                WHEN excluded.user_status='dismissed' THEN 'dismissed'
+                ELSE notices.user_status
+            END
     """,
         (
             object_id,
@@ -417,6 +522,7 @@ def upsert_notice_and_state(
             now_iso,
             tender_id,
             is_below_eu_int,
+            notice.get("user_status"),
         ),
     )
 
@@ -550,9 +656,13 @@ def build_queries_for_profile(
     provinces = profile.provinces or []
     queries: List[BzpQuery] = []
 
-    def _add_pl_eu_pair(cpv_code: Optional[str], order_type: Optional[str]) -> None:
-        """Dodaje parę zapytań (krajowe + unijne) dla danego CpvCode i OrderType."""
-        # Przejście 1: KRAJOWE
+    def _add_query(cpv_code: Optional[str], order_type: Optional[str]) -> None:
+        """Dodaje zapytanie dla danego CpvCode i OrderType.
+        Nowe API (/mo-board/api/v1/notice) zwraca isTenderAmountBelowEU
+        w każdym ogłoszeniu — nie trzeba tworzyć osobnych zapytań dla
+        krajowych i unijnych.
+        Filtr province zachowany bo API go obsługuje.
+        """
         if provinces:
             for prov in provinces:
                 queries.append(
@@ -563,7 +673,6 @@ def build_queries_for_profile(
                         order_type=order_type,
                         cpv_code=cpv_code,
                         organization_province=prov,
-                        is_below_eu=True,
                     )
                 )
         else:
@@ -574,21 +683,8 @@ def build_queries_for_profile(
                     page_size=page_size,
                     order_type=order_type,
                     cpv_code=cpv_code,
-                    is_below_eu=True,
                 )
             )
-
-        # Przejście 2: UNIJNE (bez province)
-        queries.append(
-            BzpQuery(
-                publication_from=date_from,
-                publication_to=date_to,
-                page_size=page_size,
-                order_type=order_type,
-                cpv_code=cpv_code,
-                is_below_eu=False,
-            )
-        )
 
     # Lista typów zamówienia — puste = jedno zapytanie bez filtra
     ot_list = profile.order_types if profile.order_types else [None]
@@ -596,12 +692,12 @@ def build_queries_for_profile(
     # Kody grupowe → zapytanie bez CpvCode (filtr CPV lokalny)
     if has_broad:
         for ot in ot_list:
-            _add_pl_eu_pair(cpv_code=None, order_type=ot)
+            _add_query(cpv_code=None, order_type=ot)
 
     # Kody konkretne → zapytanie z exact CpvCode
     for cpv in exact_codes:
         for ot in ot_list:
-            _add_pl_eu_pair(cpv_code=cpv, order_type=ot)
+            _add_query(cpv_code=cpv, order_type=ot)
 
     return queries
 
@@ -616,7 +712,7 @@ def main() -> None:
     init_db(db_path)
 
     hours_back = int(os.getenv("TENDERBOT_HOURS_BACK", "168"))
-    page_size = int(os.getenv("TENDERBOT_PAGE_SIZE", "100"))
+    page_size = int(os.getenv("TENDERBOT_PAGE_SIZE", "500"))
     only_open = os.getenv("TENDERBOT_ONLY_OPEN", "0") == "1"
     skip_ted = os.getenv("TENDERBOT_SKIP_TED", "0") == "1"
     debug = os.getenv("TENDERBOT_DEBUG", "0") == "1"
@@ -677,14 +773,11 @@ def main() -> None:
                 )
 
                 for qi, q in enumerate(queries):
-                    tag = "EU" if q.is_below_eu is False else "PL"
-
                     if debug:
                         print(
-                            f"[QUERY {qi + 1}/{len(queries)}][{tag}] "
+                            f"[QUERY {qi + 1}/{len(queries)}] "
                             f"cpv={q.cpv_code or '(brak→lokalny filtr)'} "
-                            f"prov={q.organization_province} "
-                            f"belowEU={q.is_below_eu}"
+                            f"prov={q.organization_province}"
                         )
 
                     query_count = 0
@@ -700,10 +793,11 @@ def main() -> None:
                         total_seen += 1
                         query_count += 1
 
-                        # Stamp is_below_eu z parametru zapytania
-                        # (API nie zwraca tego pola w odpowiedzi)
+                        # Nowe API zwraca isTenderAmountBelowEU w odpowiedzi
+                        # Stamp tylko gdy brak (starsze wpisy)
                         if notice.get("isTenderAmountBelowEU") is None:
-                            notice["isTenderAmountBelowEU"] = q.is_below_eu
+                            # Domyślnie krajowe (Board/Search obejmuje Polskę)
+                            notice["isTenderAmountBelowEU"] = True
 
                         # Debug: target
                         if target_id and object_id == target_id:
@@ -759,8 +853,10 @@ def main() -> None:
                         now_iso = utc_now().isoformat()
 
                         print(
-                            f"DEBUG tender_type={notice.get('tenderType')!r}  orderType={notice.get('orderType')!r}"
                         )
+
+                        if should_auto_dismiss(notice):
+                            notice["user_status"] = "dismissed"
 
                         upsert_notice_and_state(
                             db_path,
@@ -871,8 +967,10 @@ def main() -> None:
                         now_iso = utc_now().isoformat()
 
                         print(
-                            f"DEBUG tender_type={notice.get('tenderType')!r}  orderType={notice.get('orderType')!r}"
                         )
+
+                        if should_auto_dismiss(notice):
+                            notice["user_status"] = "dismissed"
 
                         upsert_notice_and_state(
                             db_path,
