@@ -82,18 +82,23 @@ def _get_ted_body_full(object_id: str, client: httpx.Client) -> str:
     return text
 
 
-def _get_bzp_body(r: sqlite3.Row, client: httpx.Client) -> str:
-    object_id = r["object_id"]
+def _get_bzp_body(object_id: str, client: httpx.Client, payload_json: str = "") -> str:
     print(f"    📥 Pobieram stronę BZP: {object_id[:20]}...")
-    html = fetch_notice_html(
-        object_id,
-        client=client,
-        bzp_number=r["bzp_number"] or None,
-        notice_number=r["notice_number"] or None,
-    )
+    html = fetch_notice_html(object_id, client=client)
     if not html:
         print("    ⚠ Nie udało się pobrać strony BZP")
-        return ""
+        # Fallback: użyj htmlBody z payload_json zapisanego przy pobraniu
+        if payload_json:
+            try:
+                import json as _json
+                payload = _json.loads(payload_json)
+                html = payload.get("htmlBody") or ""
+                if html:
+                    print("    📦 Używam htmlBody z payload_json (fallback)")
+            except Exception:
+                pass
+        if not html:
+            return ""
     text = extract_bzp_text(html)
     print(f"    📄 Wyciągnięto {len(text)} znaków z BZP")
     return text
@@ -120,9 +125,10 @@ def get_notices_needing_work(db_path: str, limit: int) -> list:
                s.updated_at as sum_updated_at
         FROM notices n
         LEFT JOIN summaries s ON s.object_id = n.object_id
-        WHERE (n.user_status IS NULL OR n.user_status != 'dismissed')
+        WHERE n.user_status != 'dismissed' OR n.user_status IS NULL
           AND (
               s.object_id IS NULL
+              OR n.updated_at > s.updated_at
               OR s.summary_json = '{}'
               OR s.summary_json IS NULL
               OR s.detailed_text IS NULL
@@ -223,7 +229,7 @@ def main():
                         body_full = _get_ted_body_full(object_id, http_client)
                 else:
                     # BZP — ta sama treść HTML dla obu
-                    body = _get_bzp_body(r, http_client)
+                    body = _get_bzp_body(object_id, http_client, payload_json=r["payload_json"] or "")
                     body_full = body
 
             # ── Streszczenie strukturalne ──
@@ -255,7 +261,7 @@ def main():
                         if object_id.startswith("ted-"):
                             body_full = _get_ted_body_full(object_id, http_client)
                         else:
-                            body_full = _get_bzp_body(r, http_client)
+                            body_full = _get_bzp_body(object_id, http_client, payload_json=r["payload_json"] or "")
 
                     if body_full.strip():
                         detail = detailed_summary_text(body_full, backend=backend)

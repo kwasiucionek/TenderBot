@@ -401,6 +401,7 @@ def fmt_cpv(code8: str) -> str:
     return f"{code8} — {CPV_MAP.get(code8, '')}"
 
 
+
 def render_notice(r, conn, ignored_cpv_set, key_prefix="", flat=False):
     """Renderuje pojedyncze ogłoszenie jako expander z pełną treścią."""
     object_id = r["object_id"]
@@ -458,7 +459,28 @@ def render_notice(r, conn, ignored_cpv_set, key_prefix="", flat=False):
         pdf_url = None
         if is_ted:
             pub_number = object_id.removeprefix("ted-")
-            pdf_url = f"https://ted.europa.eu/pl/notice/{pub_number}/pdfs"
+            # Dobierz język PDF wg kraju organizacji
+            # EN jest dostępny dla wszystkich ogłoszeń TED
+            _country_lang = {
+                "POL": "pl", "DEU": "de", "FRA": "fr", "ESP": "es",
+                "ITA": "it", "NLD": "nl", "SWE": "sv", "FIN": "fi",
+                "DNK": "da", "NOR": "no", "CZE": "cs", "SVK": "sk",
+                "HRV": "hr", "SVN": "sl", "HUN": "hu", "ROU": "ro",
+                "BGR": "bg", "GRC": "el", "PRT": "pt", "IRL": "en",
+                "AUT": "de", "CHE": "de", "BEL": "fr", "LUX": "fr",
+                "EST": "et", "LVA": "lv", "LTU": "lt", "MLT": "en",
+                "CYP": "el",
+            }
+            try:
+                _pj = json.loads(conn.execute(
+                    "SELECT payload_json FROM notices WHERE object_id = ?",
+                    (object_id,)
+                ).fetchone()["payload_json"])
+                _country = (_pj.get("organizationCountry") or "").split(";")[0].strip()
+                _ted_lang = _country_lang.get(_country, "en")
+            except Exception:
+                _ted_lang = "en"
+            pdf_url = f"https://ted.europa.eu/{_ted_lang}/notice/{pub_number}/pdfs"
         elif is_eu:
             try:
                 payload = conn.execute(
@@ -534,7 +556,9 @@ def render_notice(r, conn, ignored_cpv_set, key_prefix="", flat=False):
                             )
 
                             raw_html = fetch_notice_html(object_id)
-                            full_text = extract_bzp_text(raw_html) if raw_html else ""
+                            full_text = (
+                                extract_bzp_text(raw_html) if raw_html else ""
+                            )
 
                         if not full_text.strip():
                             st.warning("Brak treści do streszczenia.")
@@ -593,13 +617,11 @@ def render_notice(r, conn, ignored_cpv_set, key_prefix="", flat=False):
                             st.error(f"Błąd: {e}")
 
         # ─── Oznaczanie ⭐ / ❌ ───
-        act_cols = st.columns([1, 1, 1, 4])
+        act_cols = st.columns([1, 1, 1, 1, 2])
         with act_cols[0]:
             if user_status != "starred":
                 if st.button(
-                    "⭐ Wybierz",
-                    key=f"{key_prefix}star_{object_id}",
-                    use_container_width=True,
+                    "⭐ Wybierz", key=f"{key_prefix}star_{object_id}", use_container_width=True
                 ):
                     conn.execute(
                         "UPDATE notices SET user_status = 'starred'"
@@ -647,6 +669,18 @@ def render_notice(r, conn, ignored_cpv_set, key_prefix="", flat=False):
                     )
                     conn.commit()
                     st.rerun()
+        with act_cols[2]:
+            if st.button(
+                "🗑️ Usuń",
+                key=f"{key_prefix}delete_{object_id}",
+                use_container_width=True,
+                help="Usuwa ogłoszenie z bazy trwale",
+            ):
+                conn.execute("DELETE FROM summaries WHERE object_id = ?", (object_id,))
+                conn.execute("DELETE FROM notice_state WHERE object_id = ?", (object_id,))
+                conn.execute("DELETE FROM notices WHERE object_id = ?", (object_id,))
+                conn.commit()
+                st.rerun()
 
         # Meta
         cpv_raw = r["cpv_code"] or ""
@@ -732,7 +766,9 @@ def render_notice(r, conn, ignored_cpv_set, key_prefix="", flat=False):
 
                 if has_struct:
                     with tabs[tab_idx]:
-                        eu = summary.get("eu_funding") or summary.get("eu_project_hint")
+                        eu = summary.get("eu_funding") or summary.get(
+                            "eu_project_hint"
+                        )
                         if eu and eu is not True:
                             st.success(f"🇪🇺 {eu}")
                         elif eu is True:
@@ -748,13 +784,17 @@ def render_notice(r, conn, ignored_cpv_set, key_prefix="", flat=False):
 
                         params = []
                         if summary.get("estimated_value"):
-                            params.append(f"💰 Wartość: {summary['estimated_value']}")
+                            params.append(
+                                f"💰 Wartość: {summary['estimated_value']}"
+                            )
                         if summary.get("execution_period"):
                             params.append(
                                 f"⏱ Realizacja: {summary['execution_period']}"
                             )
                         if summary.get("deposit_required"):
-                            params.append(f"🔒 Wadium: {summary['deposit_required']}")
+                            params.append(
+                                f"🔒 Wadium: {summary['deposit_required']}"
+                            )
                         if params:
                             st.caption(" · ".join(params))
 
@@ -857,7 +897,9 @@ with st.sidebar:
             except Exception:
                 pass
 
-            _default_model = os.environ.get("OLLAMA_MODEL", "kimi-k2.5:cloud")
+            _default_model = os.environ.get(
+                "OLLAMA_MODEL", "mistral-large-3:675b-cloud"
+            )
             if _ollama_models:
                 _idx = (
                     _ollama_models.index(_default_model)
@@ -1199,6 +1241,8 @@ conn.row_factory = sqlite3.Row
 # ╚══════════════════════════════════════════════════════════╝
 
 
+
+
 # ─── RAG ───
 with st.expander("🔍 Zapytaj o ogłoszenia (RAG)", expanded=True):
     rag_col1, rag_col2 = st.columns([4, 1])
@@ -1218,9 +1262,7 @@ with st.expander("🔍 Zapytaj o ogłoszenia (RAG)", expanded=True):
             "Uwzględnij zakończone", value=False, key="rag_include_expired"
         )
     with rag_opts_col2:
-        if st.button(
-            "🔄 Przebuduj indeks FTS", use_container_width=True, key="rag_reindex"
-        ):
+        if st.button("🔄 Przebuduj indeks FTS", use_container_width=True, key="rag_reindex"):
             with st.spinner("Indeksowanie..."):
                 try:
                     n = build_fts_index(DB)
@@ -1247,8 +1289,7 @@ with st.expander("🔍 Zapytaj o ogłoszenia (RAG)", expanded=True):
         if not rag_include_expired:
             _now_iso = datetime.now(timezone.utc).isoformat()
             rag_hits = [
-                h
-                for h in rag_hits
+                h for h in rag_hits
                 if not h.get("submitting_offers_date")
                 or (h.get("submitting_offers_date") or "") >= _now_iso[:10]
             ]
@@ -1296,7 +1337,6 @@ if _rag_ids:
             _rag_rows.append(_nr)
 
     _now_iso = datetime.now(timezone.utc).isoformat()
-
     def _deadline_key(r):
         d = r["submitting_offers_date"] or ""
         return d if d else "9999-99-99"
@@ -1308,11 +1348,11 @@ if _rag_ids:
     elif _rag_sort == "📅 Data publikacji (najnowsze)":
         _rag_rows.sort(key=lambda r: r["publication_date"] or "", reverse=True)
     elif _rag_sort == "⭐ Oznaczone najpierw":
-        _rag_rows.sort(key=lambda r: 0 if r["user_status"] == "starred" else 1)
+        _rag_rows.sort(key=lambda r: (0 if r["user_status"] == "starred" else 1))
     elif _rag_sort == "🇵🇱 Krajowe najpierw":
-        _rag_rows.sort(key=lambda r: 0 if not r["object_id"].startswith("ted-") else 1)
+        _rag_rows.sort(key=lambda r: (0 if not r["object_id"].startswith("ted-") else 1))
     elif _rag_sort == "🇪🇺 Unijne najpierw":
-        _rag_rows.sort(key=lambda r: 0 if r["object_id"].startswith("ted-") else 1)
+        _rag_rows.sort(key=lambda r: (0 if r["object_id"].startswith("ted-") else 1))
     elif _rag_sort == "📋 Typ zamówienia":
         _rag_rows.sort(key=lambda r: r["tender_type"] or "")
 
@@ -1321,6 +1361,7 @@ if _rag_ids:
 
     for _nr in _rag_rows:
         render_notice(_nr, conn, _rag_ignored, key_prefix="rag_")
+
 
 
 st.divider()
@@ -1363,7 +1404,7 @@ with fcol5:
     filter_search = st.text_input("🔍 Szukaj w tytule/org", value="")
 
 # Drugi rząd filtrów
-fcol2_1, fcol2_2 = st.columns([1, 2])
+fcol2_1, fcol2_2, fcol2_3 = st.columns([1, 1, 2])
 with fcol2_1:
     FILTER_ORDER_TYPES = {
         "Wszystkie": None,
@@ -1376,6 +1417,16 @@ with fcol2_1:
         options=list(FILTER_ORDER_TYPES.keys()),
     )
 with fcol2_2:
+    SORT_OPTIONS = {
+        "📅 Data publikacji": "n.publication_date DESC",
+        "⏰ Deadline (rosnąco)": "n.submitting_offers_date ASC",
+        "⏰ Deadline (malejąco)": "n.submitting_offers_date DESC",
+        "⭐ Oznaczone najpierw": "CASE WHEN n.user_status='starred' THEN 0 ELSE 1 END ASC",
+        "🇵🇱 Krajowe najpierw": "n.is_below_eu DESC",
+        "🇪🇺 Unijne najpierw": "n.is_below_eu ASC",
+    }
+    filter_sort = st.selectbox("Sortuj", options=list(SORT_OPTIONS.keys()))
+with fcol2_3:
     ignored_cpv_set = load_ignored_cpv()
     hide_ignored = st.checkbox(
         f"🚫 Ukryj ignorowane CPV ({len(ignored_cpv_set)})",
@@ -1387,7 +1438,7 @@ with fcol2_2:
 filter_key = (
     f"{filter_eu}|{filter_profile}|{filter_status}"
     f"|{filter_mark}|{filter_search}"
-    f"|{filter_order_type}|{hide_ignored}"
+    f"|{filter_order_type}|{filter_sort}|{hide_ignored}"
 )
 if st.session_state.get("_filter_key") != filter_key:
     st.session_state["page"] = 0
@@ -1488,7 +1539,7 @@ try:
         FROM notices n
         LEFT JOIN summaries s ON s.object_id = n.object_id
         WHERE {where_clause}
-        ORDER BY n.publication_date DESC
+        ORDER BY {SORT_OPTIONS.get(filter_sort, "n.publication_date DESC")}
         LIMIT ? OFFSET ?
         """,
         params + [PAGE_SIZE, offset],
@@ -1580,3 +1631,4 @@ else:
                 st.rerun()
 
 conn.close()
+

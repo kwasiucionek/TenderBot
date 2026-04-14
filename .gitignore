@@ -1,6 +1,6 @@
 # Baza danych
 #data/
-#*.sqlite
+*.sqlite
 #*.sqlite3
 #*.db
 

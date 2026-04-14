@@ -553,4 +553,24 @@ def extract_text_from_ted_xml(xml_text: str, lang: str = "POL") -> str:
     for tp in root.findall(".//cac:TenderingProcess/cbc:Description", _XML_NS):
         _add("TRYB", _pol(tp))
 
+    # 9. Szacunkowa wartość zamówienia
+    for amount_el in root.findall(
+        ".//cbc:EstimatedOverallContractAmount", _XML_NS
+    ):
+        val = amount_el.text
+        currency = amount_el.get("currencyID", "")
+        if val:
+            try:
+                val_fmt = f"{float(val):,.2f}".replace(",", " ")
+            except ValueError:
+                val_fmt = val
+            _add("WARTOŚĆ SZACUNKOWA", f"{val_fmt} {currency} (bez VAT)")
+
+    # 10. Deadline składania ofert
+    for deadline in root.findall(
+        ".//cac:TenderingProcess/cac:TenderSubmissionDeadlinePeriod/cbc:EndDate", _XML_NS
+    ):
+        if deadline.text:
+            _add("TERMIN SKŁADANIA OFERT", deadline.text)
+
     return "\n\n".join(sections)

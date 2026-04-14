@@ -439,6 +439,25 @@ def get_state_fingerprint(db_path: str, object_id: str) -> Optional[str]:
     return row["fingerprint"] if row else None
 
 
+def load_ignored_cpv_codes(db_path: str) -> set[str]:
+    """Załaduj kody CPV z tabeli ignored_cpv."""
+    conn = connect(db_path)
+    rows = conn.execute("SELECT cpv_code FROM ignored_cpv").fetchall()
+    conn.close()
+    return {r["cpv_code"] for r in rows}
+
+
+def matches_ignored_cpv(cpv_field: str, ignored_codes: set[str]) -> bool:
+    """
+    Zwraca True jeśli jakikolwiek kod CPV ogłoszenia jest na liście ignorowanych.
+    Sprawdza dokładne dopasowanie 8-cyfrowego kodu.
+    """
+    if not ignored_codes or not cpv_field:
+        return False
+    codes = cpv_codes8(cpv_field)
+    return any(code in ignored_codes for code in codes)
+
+
 def load_dismissed_ids(db_path: str) -> set[str]:
     """Załaduj object_id ogłoszeń oznaczonych jako dismissed (❌)."""
     conn = connect(db_path)
@@ -447,6 +466,21 @@ def load_dismissed_ids(db_path: str) -> set[str]:
     ).fetchall()
     conn.close()
     return {r["object_id"] for r in rows}
+
+
+def load_seen_ids(db_path: str) -> set[str]:
+    """
+    Załaduj wszystkie object_id kiedykolwiek widziane przez monitor (notice_state).
+
+    To jest właściwa pamięć monitora — nawet jeśli ogłoszenie zostało usunięte
+    z tabeli notices, notice_state pamięta że było już pobrane.
+    Dzięki temu monitor nie pobiera ponownie usuniętych ogłoszeń.
+    """
+    conn = connect(db_path)
+    rows = conn.execute("SELECT object_id FROM notice_state").fetchall()
+    conn.close()
+    return {r["object_id"] for r in rows}
+
 
 
 def upsert_notice_and_state(
@@ -737,13 +771,20 @@ def main() -> None:
     total_matched = 0
     total_skipped_cpv = 0
     total_skipped_prov = 0
-    seen_ids: set[str] = set()
+    # seen_ids = wszystkie kiedykolwiek widziane ogłoszenia (notice_state)
+    # Dzięki temu monitor nie pobiera ponownie ogłoszeń usuniętych z bazy.
+    seen_ids: set[str] = load_seen_ids(db_path)
+    print(f"Znanych ogłoszeń (notice_state): {len(seen_ids)}")
 
-    # Pomijaj ogłoszenia oznaczone jako dismissed (❌)
+    # Dodatkowo: dismissed z notices (na wypadek gdyby notice_state był niekompletny)
     dismissed = load_dismissed_ids(db_path)
     if dismissed:
         seen_ids.update(dismissed)
         print(f"Pomijam {len(dismissed)} dismissed ogłoszeń")
+
+    ignored_cpv_codes = load_ignored_cpv_codes(db_path)
+    if ignored_cpv_codes:
+        print(f"Ignorowane kody CPV: {len(ignored_cpv_codes)}")
 
     with httpx.Client(headers=headers, timeout=httpx.Timeout(60.0)) as client:
         for p in profiles:
@@ -830,6 +871,14 @@ def main() -> None:
                             if debug:
                                 print(
                                     f"  [SKIP-CPV] {object_id} "
+                                    f"cpv={notice.get('cpvCode', '')[:30]}"
+                                )
+                            continue
+
+                        if matches_ignored_cpv(notice.get("cpvCode", ""), ignored_cpv_codes):
+                            if debug:
+                                print(
+                                    f"  [SKIP-IGN] {object_id} "
                                     f"cpv={notice.get('cpvCode', '')[:30]}"
                                 )
                             continue
@@ -956,6 +1005,9 @@ def main() -> None:
                         # Lokalna weryfikacja CPV
                         if not matches_profile(notice, p.cpv_prefixes):
                             total_skipped_cpv += 1
+                            continue
+
+                        if matches_ignored_cpv(notice.get("cpvCode", ""), ignored_cpv_codes):
                             continue
 
                         total_matched += 1
