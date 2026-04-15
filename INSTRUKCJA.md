@@ -260,10 +260,10 @@ Aby przejść do ustawień, kliknij **⚙️ Ustawienia** w lewym menu bocznym a
 To jedna z najważniejszych funkcji — pozwala automatycznie sortować ogłoszenia bez ręcznego przeglądania każdego z nich.
 
 ---
-
-<img src="pics/7.png" style="width:50%;">
-<img src="pics/7a.png" style="width:50%;">
-
+<div style="display:flex; gap:16px;">
+    <img src="pics/7.png" style="width:48%;">
+    <img src="pics/7a.png" style="width:48%;">
+</div>
 
 ---
 
@@ -337,10 +337,10 @@ Model językowy rozumie odmiany przez przypadki i synonimy. Wolniejszy, ale duż
 ## 12. Ustawienia — ignorowane kody CPV
 
 ---
-
-
-<img src="pics/8.png" style="width:50%;">
-<img src="pics/8a.png" style="width:50%;">
+<div style="display:flex; gap:16px;">
+    <img src="pics/8.png" style="width:48%;">
+    <img src="pics/8a.png" style="width:48%;">
+</div>
 ---
 
 Lista ignorowanych kodów CPV jest domyślnie **zwinięta** — widać tylko liczbę kodów w nawiasie. Kliknij nagłówek żeby ją rozwinąć.
