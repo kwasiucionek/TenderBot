@@ -226,6 +226,28 @@ def init_db(db_path: str) -> None:
     if "user_status" not in ncols:
         cur.execute("ALTER TABLE notices ADD COLUMN user_status TEXT")
 
+    # Tabela ignorowanych zwrotów (Oracle, SAP itp.)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS ignored_phrases (
+        phrase TEXT PRIMARY KEY,
+        description TEXT,
+        ignored_at TEXT NOT NULL
+    )
+    """)
+
+    # Tabela preferowanych zwrotów — ogłoszenia pasujące dostają auto-gwiazdkę ⭐
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS starred_phrases (
+        phrase TEXT PRIMARY KEY,
+        description TEXT,
+        created_at TEXT NOT NULL
+    )
+    """)
+
+    # Kolumna relevance_score w notices
+    if "relevance_score" not in ncols:
+        cur.execute("ALTER TABLE notices ADD COLUMN relevance_score INTEGER")
+
     # Fix: TED notices zawsze EU (is_below_eu=0)
     cur.execute("""
         UPDATE notices SET is_below_eu = 0
@@ -310,6 +332,95 @@ def load_active_profiles(db_path: str) -> List[Profile]:
 # Fingerprint + upsert
 # -------------------------
 
+
+
+# ── LLM relevance scoring ─────────────────────────────────────────────────────
+
+_RELEVANCE_SYSTEM = """Jesteś ekspertem oceniającym trafność ogłoszenia przetargowego dla firmy Neurosoft.
+
+Profil firmy (zamówienia INTERESUJĄCE):
+- Sztuczna inteligencja, ML, computer vision, NLP, LLM
+- ANPR — rozpoznawanie tablic rejestracyjnych, wykrywanie pojazdów
+- ITS — inteligentne systemy transportowe, zarządzanie ruchem
+- SmartCity — cyfryzacja miast, systemy miejskie oparte o AI/dane
+- Parking — systemy parkingowe, automatyzacja, monitoring
+- Anonimizacja danych, przetwarzanie dokumentów (NLP)
+- Cyberbezpieczeństwo (jako temat główny)
+
+Zamówienia NIEINTERESUJĄCE (score 0-20):
+- Ogólne usługi IT bez AI/ML (serwis oprogramowania, licencje, helpdesk)
+- Systemy ERP/SAP/Oracle/kadrowe
+- Infrastruktura sieciowa, serwery, backup
+- Projekty zagraniczne bez wyraźnego powiązania z profilem
+- Usługi niezwiązane z IT
+
+Odpowiedz WYŁĄCZNIE liczbą od 0 do 100 (bez żadnego innego tekstu).
+0 = zupełnie nieistotne, 100 = idealnie pasuje do profilu."""
+
+_RELEVANCE_THRESHOLD = int(os.getenv("TENDERBOT_RELEVANCE_THRESHOLD", "60"))
+_RELEVANCE_STAR_THRESHOLD = int(os.getenv("TENDERBOT_STAR_THRESHOLD", "80"))
+_LLM_SCORING_ENABLED = os.getenv("TENDERBOT_LLM_SCORING", "0") == "1"
+
+
+def llm_relevance_score(notice: Dict[str, Any]) -> Optional[int]:
+    """
+    Ocenia trafność ogłoszenia przez LLM (0-100).
+    Zwraca None jeśli scoring jest wyłączony lub wystąpi błąd.
+
+    Włącz przez: TENDERBOT_LLM_SCORING=1
+    Próg odrzucenia: TENDERBOT_RELEVANCE_THRESHOLD=60 (domyślnie)
+    Próg auto-gwiazdki: TENDERBOT_STAR_THRESHOLD=80 (domyślnie)
+    """
+    if not _LLM_SCORING_ENABLED:
+        return None
+
+    title = notice.get("orderObject") or notice.get("order_object") or ""
+    org = notice.get("organizationName") or notice.get("organization_name") or ""
+    cpv = notice.get("cpvCode") or notice.get("cpv_code") or ""
+    country = notice.get("organizationCountry") or ""
+
+    user_msg = f"""Tytuł: {title}
+Organizacja: {org}
+Kraj: {country}
+CPV: {cpv[:100]}"""
+
+    try:
+        import httpx as _httpx
+        ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        ollama_model = os.getenv("OLLAMA_MODEL", "")
+        ollama_key = os.getenv("OLLAMA_API_KEY", "")
+        if not ollama_model:
+            return None
+
+        headers = {"Content-Type": "application/json"}
+        if ollama_key:
+            headers["Authorization"] = f"Bearer {ollama_key}"
+
+        resp = _httpx.post(
+            f"{ollama_host}/api/chat",
+            json={
+                "model": ollama_model,
+                "messages": [
+                    {"role": "system", "content": _RELEVANCE_SYSTEM},
+                    {"role": "user", "content": user_msg},
+                ],
+                "stream": False,
+                "options": {"temperature": 0.0},
+            },
+            headers=headers,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        text = resp.json()["message"]["content"].strip()
+        # Wyciągnij pierwszą liczbę z odpowiedzi
+        import re as _re
+        m = _re.search(r"\d+", text)
+        if m:
+            score = min(100, max(0, int(m.group())))
+            return score
+    except Exception as e:
+        print(f"    ⚠ LLM scoring błąd: {e}")
+    return None
 
 
 # ── Wzorce auto-dismiss ────────────────────────────────────────────────────────
@@ -447,6 +558,123 @@ def load_ignored_cpv_codes(db_path: str) -> set[str]:
     return {r["cpv_code"] for r in rows}
 
 
+def load_ignored_phrases(db_path: str) -> List[str]:
+    """Załaduj ignorowane zwroty z tabeli ignored_phrases."""
+    conn = connect(db_path)
+    try:
+        rows = conn.execute("SELECT phrase FROM ignored_phrases").fetchall()
+        return [r["phrase"].lower() for r in rows]
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
+def load_starred_phrases(db_path: str) -> List[str]:
+    """Załaduj preferowane zwroty z tabeli starred_phrases."""
+    conn = connect(db_path)
+    try:
+        rows = conn.execute("SELECT phrase FROM starred_phrases").fetchall()
+        return [r["phrase"].lower() for r in rows]
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
+# ── Phrase matching ────────────────────────────────────────────────────────────
+# TENDERBOT_PHRASE_MATCHING=simple (domyślnie) — dopasowanie podciągu
+# TENDERBOT_PHRASE_MATCHING=llm — LLM uwzględnia odmianę przez przypadki
+
+_PHRASE_MATCHING = os.getenv("TENDERBOT_PHRASE_MATCHING", "simple").lower()
+
+_PHRASE_SYSTEM = """Sprawdzasz czy ogłoszenie przetargowe pasuje do listy zwrotów.
+Uwzględniaj odmiany przez przypadki, synonimy i skróty (np. "sądy powszechne" pasuje do "sądach powszechnych", "ANPR" pasuje do "rozpoznawanie tablic rejestracyjnych").
+Odpowiedz WYŁĄCZNIE: TAK lub NIE."""
+
+
+def _llm_phrase_match(notice_text: str, phrases: List[str]) -> bool:
+    """Pyta LLM czy ogłoszenie pasuje do któregokolwiek ze zwrotów."""
+    try:
+        import httpx as _httpx
+        ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+        # TENDERBOT_PHRASE_MODEL — dedykowany model do dopasowania zwrotów
+        # fallback: OLLAMA_MODEL (model używany do streszczeń)
+        ollama_model = (
+            os.getenv("TENDERBOT_PHRASE_MODEL")
+            or os.getenv("OLLAMA_MODEL")
+            or ""
+        )
+        ollama_key = os.getenv("OLLAMA_API_KEY", "")
+        if not ollama_model:
+            return False
+
+        phrases_str = "\n".join(f"- {p}" for p in phrases)
+        user_msg = f"Ogłoszenie:\n{notice_text}\n\nCzy pasuje do któregoś ze zwrotów:\n{phrases_str}"
+
+        headers = {"Content-Type": "application/json"}
+        if ollama_key:
+            headers["Authorization"] = f"Bearer {ollama_key}"
+
+        resp = _httpx.post(
+            f"{ollama_host}/api/chat",
+            json={
+                "model": ollama_model,
+                "messages": [
+                    {"role": "system", "content": _PHRASE_SYSTEM},
+                    {"role": "user", "content": user_msg},
+                ],
+                "stream": False,
+                "options": {"temperature": 0.0},
+            },
+            headers=headers,
+            timeout=20,
+        )
+        resp.raise_for_status()
+        answer = resp.json()["message"]["content"].strip().upper()
+        return answer.startswith("TAK")
+    except Exception as e:
+        # Fallback do prostego dopasowania przy błędzie LLM
+        return False
+
+
+def _simple_phrase_match(text: str, phrases: List[str]) -> bool:
+    """Proste dopasowanie podciągu (case-insensitive)."""
+    return any(phrase in text for phrase in phrases)
+
+
+def _notice_text(notice: Dict[str, Any]) -> str:
+    title = notice.get("orderObject") or notice.get("order_object") or ""
+    org = notice.get("organizationName") or notice.get("organization_name") or ""
+    return f"{title} {org}".lower()
+
+
+def matches_ignored_phrase(notice: Dict[str, Any], phrases: List[str]) -> bool:
+    """Zwraca True jeśli ogłoszenie pasuje do ignorowanych zwrotów."""
+    if not phrases:
+        return False
+    text = _notice_text(notice)
+    if _PHRASE_MATCHING == "llm":
+        # Najpierw szybki test prosty — jeśli coś pasuje wprost, nie pytaj LLM
+        if _simple_phrase_match(text, phrases):
+            return True
+        return _llm_phrase_match(f"{notice.get('orderObject') or ''} | {notice.get('organizationName') or ''}", phrases)
+    return _simple_phrase_match(text, phrases)
+
+
+def matches_starred_phrase(notice: Dict[str, Any], phrases: List[str]) -> bool:
+    """Zwraca True jeśli ogłoszenie pasuje do preferowanych zwrotów (auto-⭐)."""
+    if not phrases:
+        return False
+    text = _notice_text(notice)
+    if _PHRASE_MATCHING == "llm":
+        if _simple_phrase_match(text, phrases):
+            return True
+        return _llm_phrase_match(f"{notice.get('orderObject') or ''} | {notice.get('organizationName') or ''}", phrases)
+    return _simple_phrase_match(text, phrases)
+
+
+
 def matches_ignored_cpv(cpv_field: str, ignored_codes: set[str]) -> bool:
     """
     Zwraca True jeśli jakikolwiek kod CPV ogłoszenia jest na liście ignorowanych.
@@ -466,21 +694,6 @@ def load_dismissed_ids(db_path: str) -> set[str]:
     ).fetchall()
     conn.close()
     return {r["object_id"] for r in rows}
-
-
-def load_seen_ids(db_path: str) -> set[str]:
-    """
-    Załaduj wszystkie object_id kiedykolwiek widziane przez monitor (notice_state).
-
-    To jest właściwa pamięć monitora — nawet jeśli ogłoszenie zostało usunięte
-    z tabeli notices, notice_state pamięta że było już pobrane.
-    Dzięki temu monitor nie pobiera ponownie usuniętych ogłoszeń.
-    """
-    conn = connect(db_path)
-    rows = conn.execute("SELECT object_id FROM notice_state").fetchall()
-    conn.close()
-    return {r["object_id"] for r in rows}
-
 
 
 def upsert_notice_and_state(
@@ -771,12 +984,9 @@ def main() -> None:
     total_matched = 0
     total_skipped_cpv = 0
     total_skipped_prov = 0
-    # seen_ids = wszystkie kiedykolwiek widziane ogłoszenia (notice_state)
-    # Dzięki temu monitor nie pobiera ponownie ogłoszeń usuniętych z bazy.
-    seen_ids: set[str] = load_seen_ids(db_path)
-    print(f"Znanych ogłoszeń (notice_state): {len(seen_ids)}")
+    seen_ids: set[str] = set()
 
-    # Dodatkowo: dismissed z notices (na wypadek gdyby notice_state był niekompletny)
+    # Pomijaj ogłoszenia oznaczone jako dismissed (❌)
     dismissed = load_dismissed_ids(db_path)
     if dismissed:
         seen_ids.update(dismissed)
@@ -785,6 +995,21 @@ def main() -> None:
     ignored_cpv_codes = load_ignored_cpv_codes(db_path)
     if ignored_cpv_codes:
         print(f"Ignorowane kody CPV: {len(ignored_cpv_codes)}")
+
+    ignored_phrases = load_ignored_phrases(db_path)
+    if ignored_phrases:
+        print(f"Ignorowane zwroty: {len(ignored_phrases)}")
+
+    starred_phrases = load_starred_phrases(db_path)
+    if starred_phrases:
+        print(f"Preferowane zwroty (auto-⭐): {len(starred_phrases)}")
+
+    if ignored_phrases or starred_phrases:
+        mode = "LLM" if _PHRASE_MATCHING == "llm" else "prosty (podciąg)"
+        print(f"Tryb dopasowania zwrotów: {mode}")
+
+    if _LLM_SCORING_ENABLED:
+        print(f"LLM scoring: WŁĄCZONY (próg odrzucenia={_RELEVANCE_THRESHOLD}, gwiazdka={_RELEVANCE_STAR_THRESHOLD})")
 
     with httpx.Client(headers=headers, timeout=httpx.Timeout(60.0)) as client:
         for p in profiles:
@@ -883,6 +1108,11 @@ def main() -> None:
                                 )
                             continue
 
+                        if matches_ignored_phrase(notice, ignored_phrases):
+                            if debug:
+                                print(f"  [SKIP-PHRASE] {object_id}")
+                            continue
+
                         # Lokalna weryfikacja województwa
                         if not matches_province(notice, p.provinces):
                             total_skipped_prov += 1
@@ -906,6 +1136,24 @@ def main() -> None:
 
                         if should_auto_dismiss(notice):
                             notice["user_status"] = "dismissed"
+                        else:
+                            # Auto-gwiazdka — preferowane zwroty (przed LLM)
+                            if matches_starred_phrase(notice, starred_phrases):
+                                notice["user_status"] = "starred"
+                                if debug:
+                                    print(f"  [AUTO-STAR] {object_id[:40]}")
+                            else:
+                                # LLM scoring — tylko dla nowych ogłoszeń
+                                if prev_fp is None:
+                                    score = llm_relevance_score(notice)
+                                    if score is not None:
+                                        notice["relevance_score"] = score
+                                        if score < _RELEVANCE_THRESHOLD:
+                                            notice["user_status"] = "dismissed"
+                                            print(f"  [LLM-DISMISS] score={score} {object_id[:40]}")
+                                        elif score >= _RELEVANCE_STAR_THRESHOLD:
+                                            notice["user_status"] = "starred"
+                                            print(f"  [LLM-STAR] score={score} {object_id[:40]}")
 
                         upsert_notice_and_state(
                             db_path,
@@ -1010,6 +1258,9 @@ def main() -> None:
                         if matches_ignored_cpv(notice.get("cpvCode", ""), ignored_cpv_codes):
                             continue
 
+                        if matches_ignored_phrase(notice, ignored_phrases):
+                            continue
+
                         total_matched += 1
                         if not object_id:
                             continue
@@ -1023,6 +1274,23 @@ def main() -> None:
 
                         if should_auto_dismiss(notice):
                             notice["user_status"] = "dismissed"
+                        else:
+                            # Auto-gwiazdka — preferowane zwroty
+                            if matches_starred_phrase(notice, starred_phrases):
+                                notice["user_status"] = "starred"
+                                if debug:
+                                    print(f"  [AUTO-STAR] {object_id[:40]}")
+                            else:
+                                if prev_fp is None:
+                                    score = llm_relevance_score(notice)
+                                    if score is not None:
+                                        notice["relevance_score"] = score
+                                        if score < _RELEVANCE_THRESHOLD:
+                                            notice["user_status"] = "dismissed"
+                                            print(f"  [LLM-DISMISS] score={score} {object_id[:40]}")
+                                        elif score >= _RELEVANCE_STAR_THRESHOLD:
+                                            notice["user_status"] = "starred"
+                                            print(f"  [LLM-STAR] score={score} {object_id[:40]}")
 
                         upsert_notice_and_state(
                             db_path,

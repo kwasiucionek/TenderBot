@@ -397,6 +397,74 @@ def restore_cpv(cpv_code: str) -> None:
     conn.close()
 
 
+# =========================
+# Ignored Phrases CRUD
+# =========================
+
+def load_ignored_phrases() -> list[str]:
+    conn = db()
+    try:
+        rows = conn.execute("SELECT phrase FROM ignored_phrases ORDER BY phrase").fetchall()
+        return [r[0] for r in rows]
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
+def add_ignored_phrase(phrase: str) -> None:
+    conn = db()
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute("CREATE TABLE IF NOT EXISTS ignored_phrases (phrase TEXT PRIMARY KEY, description TEXT, ignored_at TEXT NOT NULL)")
+    conn.execute(
+        "INSERT INTO ignored_phrases(phrase, ignored_at) VALUES(?,?) ON CONFLICT(phrase) DO UPDATE SET ignored_at=excluded.ignored_at",
+        (phrase.strip().lower(), now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_ignored_phrase(phrase: str) -> None:
+    conn = db()
+    conn.execute("DELETE FROM ignored_phrases WHERE phrase = ?", (phrase,))
+    conn.commit()
+    conn.close()
+
+
+# =========================
+# Starred Phrases CRUD
+# =========================
+
+def load_starred_phrases() -> list[str]:
+    conn = db()
+    try:
+        rows = conn.execute("SELECT phrase FROM starred_phrases ORDER BY phrase").fetchall()
+        return [r[0] for r in rows]
+    except Exception:
+        return []
+    finally:
+        conn.close()
+
+
+def add_starred_phrase(phrase: str) -> None:
+    conn = db()
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute("CREATE TABLE IF NOT EXISTS starred_phrases (phrase TEXT PRIMARY KEY, description TEXT, created_at TEXT NOT NULL)")
+    conn.execute(
+        "INSERT INTO starred_phrases(phrase, created_at) VALUES(?,?) ON CONFLICT(phrase) DO UPDATE SET created_at=excluded.created_at",
+        (phrase.strip().lower(), now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_starred_phrase(phrase: str) -> None:
+    conn = db()
+    conn.execute("DELETE FROM starred_phrases WHERE phrase = ?", (phrase,))
+    conn.commit()
+    conn.close()
+
+
 def fmt_cpv(code8: str) -> str:
     return f"{code8} — {CPV_MAP.get(code8, '')}"
 
@@ -459,28 +527,7 @@ def render_notice(r, conn, ignored_cpv_set, key_prefix="", flat=False):
         pdf_url = None
         if is_ted:
             pub_number = object_id.removeprefix("ted-")
-            # Dobierz język PDF wg kraju organizacji
-            # EN jest dostępny dla wszystkich ogłoszeń TED
-            _country_lang = {
-                "POL": "pl", "DEU": "de", "FRA": "fr", "ESP": "es",
-                "ITA": "it", "NLD": "nl", "SWE": "sv", "FIN": "fi",
-                "DNK": "da", "NOR": "no", "CZE": "cs", "SVK": "sk",
-                "HRV": "hr", "SVN": "sl", "HUN": "hu", "ROU": "ro",
-                "BGR": "bg", "GRC": "el", "PRT": "pt", "IRL": "en",
-                "AUT": "de", "CHE": "de", "BEL": "fr", "LUX": "fr",
-                "EST": "et", "LVA": "lv", "LTU": "lt", "MLT": "en",
-                "CYP": "el",
-            }
-            try:
-                _pj = json.loads(conn.execute(
-                    "SELECT payload_json FROM notices WHERE object_id = ?",
-                    (object_id,)
-                ).fetchone()["payload_json"])
-                _country = (_pj.get("organizationCountry") or "").split(";")[0].strip()
-                _ted_lang = _country_lang.get(_country, "en")
-            except Exception:
-                _ted_lang = "en"
-            pdf_url = f"https://ted.europa.eu/{_ted_lang}/notice/{pub_number}/pdfs"
+            pdf_url = f"https://ted.europa.eu/pl/notice/{pub_number}/pdfs"
         elif is_eu:
             try:
                 payload = conn.execute(
@@ -710,22 +757,23 @@ def render_notice(r, conn, ignored_cpv_set, key_prefix="", flat=False):
                     cpv_label_parts.append(label)
                 st.caption("CPV: " + " · ".join(cpv_label_parts))
 
-                # Przycisk ignorowania — po jednym per kod
+                # Przycisk ignorowania — po jednym per kod, zawsze
                 cpv_unique = list(dict.fromkeys(c.strip()[:8] for c in cpv_codes))
-                if len(cpv_unique) <= 6:
-                    cpv_btn_cols = st.columns(min(len(cpv_unique), 4))
-                    for idx, c8 in enumerate(cpv_unique):
-                        col = cpv_btn_cols[idx % len(cpv_btn_cols)]
+                cpv_to_show = [c8 for c8 in cpv_unique if c8 not in ignored_cpv_set]
+                if cpv_to_show:
+                    n_cols = min(len(cpv_to_show), 4)
+                    cpv_btn_cols = st.columns(n_cols)
+                    for idx, c8 in enumerate(cpv_to_show):
+                        col = cpv_btn_cols[idx % n_cols]
                         with col:
-                            if c8 not in ignored_cpv_set:
-                                desc = CPV_MAP.get(c8, c8)
-                                if st.button(
-                                    f"🚫 {c8}",
-                                    key=f"{key_prefix}ign_{object_id}_{c8}",
-                                    help=f"Ignoruj: {desc}",
-                                ):
-                                    ignore_cpv(c8, desc)
-                                    st.rerun()
+                            desc = CPV_MAP.get(c8, c8)
+                            if st.button(
+                                f"🚫 {c8}",
+                                key=f"{key_prefix}ign_{object_id}_{c8}",
+                                help=f"Ignoruj: {desc}",
+                            ):
+                                ignore_cpv(c8, desc)
+                                st.rerun()
             else:
                 st.caption(f"CPV: {cpv_raw}")
 
@@ -1202,29 +1250,184 @@ with st.sidebar:
 
     # ─── Ignorowane CPV ───
     st.divider()
-    st.subheader("🚫 Ignorowane CPV")
     ignored = load_ignored_cpv()
-    if ignored:
-        st.caption(
-            f"{len(ignored)} kodów ignorowanych — ogłoszenia z **tylko** "
-            "ignorowanymi CPV są ukrywane."
-        )
-        for cpv_code, desc in ignored.items():
-            icol1, icol2 = st.columns([4, 1])
-            with icol1:
-                label = CPV_MAP.get(cpv_code, desc or "")
-                st.caption(f"`{cpv_code}` — {label}")
-            with icol2:
-                if st.button(
-                    "↩", key=f"restore_cpv_{cpv_code}", help="Przywróć ten kod"
-                ):
-                    restore_cpv(cpv_code)
+    with st.expander(f"🚫 Ignorowane CPV ({len(ignored)})", expanded=False):
+        if ignored:
+            st.caption(
+                f"{len(ignored)} kodów ignorowanych — ogłoszenia z **tylko** "
+                "ignorowanymi CPV są ukrywane."
+            )
+            for cpv_code, desc in ignored.items():
+                icol1, icol2 = st.columns([4, 1])
+                with icol1:
+                    label = CPV_MAP.get(cpv_code, desc or "")
+                    st.caption(f"`{cpv_code}` — {label}")
+                with icol2:
+                    if st.button(
+                        "↩", key=f"restore_cpv_{cpv_code}", help="Przywróć ten kod"
+                    ):
+                        restore_cpv(cpv_code)
+                        st.rerun()
+        else:
+            st.caption(
+                "Brak ignorowanych kodów. Możesz ignorować kody "
+                "klikając 🚫 przy kodzie CPV w ogłoszeniu."
+            )
+
+    # ─── Ignorowane zwroty ───
+    st.divider()
+    st.subheader("🔤 Ignorowane zwroty")
+    st.caption("Ogłoszenia zawierające te zwroty są pomijane przez monitor.")
+    phrases_ign = load_ignored_phrases()
+    if phrases_ign:
+        for phrase in phrases_ign:
+            pc1, pc2 = st.columns([4, 1])
+            with pc1:
+                st.caption(f"`{phrase}`")
+            with pc2:
+                if st.button("↩", key=f"del_ign_{phrase}", help="Usuń"):
+                    delete_ignored_phrase(phrase)
+                    st.rerun()
+    new_ign = st.text_input(
+        "Dodaj ignorowany zwrot",
+        placeholder="np. Oracle, SAP, Microsoft",
+        key="new_ignore_phrase",
+    )
+    if st.button("➕ Dodaj", key="btn_add_ign"):
+        if new_ign.strip():
+            for p in new_ign.split(","):
+                if p.strip():
+                    add_ignored_phrase(p.strip())
+            st.success(f"Dodano: {new_ign}")
+            st.rerun()
+    if phrases_ign:
+        st.divider()
+        if st.button(
+            "🗑️ Usuń z bazy ogłoszenia z ignorowanymi zwrotami",
+            key="btn_purge_phrases",
+            type="secondary",
+            help="Trwale usuwa ogłoszenia pasujące do zwrotów. notice_state zostaje.",
+        ):
+            conn_p = db()
+            deleted = 0
+            for phrase in phrases_ign:
+                for row in conn_p.execute("""
+                    SELECT object_id FROM notices
+                    WHERE (user_status IS NULL OR user_status != 'dismissed')
+                    AND (LOWER(order_object) LIKE ? OR LOWER(organization_name) LIKE ?)
+                """, (f"%{phrase}%", f"%{phrase}%")).fetchall():
+                    conn_p.execute("DELETE FROM summaries WHERE object_id = ?", (row[0],))
+                    conn_p.execute("DELETE FROM notices WHERE object_id = ?", (row[0],))
+                    deleted += 1
+            conn_p.commit()
+            conn_p.execute("VACUUM")
+            conn_p.close()
+            st.success(f"Usunięto {deleted} ogłoszeń.")
+            st.rerun()
+
+    # ─── Preferowane zwroty (auto-⭐) ───
+    st.divider()
+    st.subheader("⭐ Preferowane zwroty (auto-gwiazdka)")
+    st.caption(
+        "Ogłoszenia zawierające te zwroty w tytule lub nazwie org "
+        "są automatycznie oznaczane jako ⭐ przez monitor."
+    )
+    phrases_star = load_starred_phrases()
+    if phrases_star:
+        for phrase in phrases_star:
+            sc1, sc2 = st.columns([4, 1])
+            with sc1:
+                st.caption(f"⭐ `{phrase}`")
+            with sc2:
+                if st.button("↩", key=f"del_star_{phrase}", help="Usuń"):
+                    delete_starred_phrase(phrase)
                     st.rerun()
     else:
-        st.caption(
-            "Brak ignorowanych kodów. Możesz ignorować kody "
-            "klikając 🚫 przy kodzie CPV w ogłoszeniu."
+        st.caption("Brak preferowanych zwrotów.")
+    new_star = st.text_input(
+        "Dodaj preferowany zwrot",
+        placeholder="np. ANPR, parking, tablice rejestracyjne",
+        key="new_star_phrase",
+    )
+    if st.button("➕ Dodaj", key="btn_add_star"):
+        if new_star.strip():
+            for p in new_star.split(","):
+                if p.strip():
+                    add_starred_phrase(p.strip())
+            st.success(f"Dodano: {new_star}")
+            st.rerun()
+    if phrases_star:
+        st.divider()
+        phrase_mode = os.getenv("TENDERBOT_PHRASE_MATCHING", "simple").lower()
+        help_txt = (
+            "Tryb LLM — uwzględnia odmianę przez przypadki. Może chwilę potrwać."
+            if phrase_mode == "llm"
+            else "Tryb prosty — dopasowanie podciągu. Ustaw TENDERBOT_PHRASE_MATCHING=llm dla obsługi odmiany."
         )
+        if st.button(
+            "⭐ Oznacz istniejące ogłoszenia pasujące do zwrotów",
+            key="btn_star_existing",
+            help=help_txt,
+        ):
+            conn_s = db()
+            conn_s.row_factory = sqlite3.Row
+            all_candidates = conn_s.execute("""
+                SELECT object_id, order_object, organization_name
+                FROM notices WHERE user_status IS NULL
+            """).fetchall()
+            conn_s.close()
+
+            starred_count = 0
+
+            if phrase_mode == "llm":
+                try:
+                    from monitor import _llm_phrase_match, _simple_phrase_match
+                    use_llm = True
+                except ImportError:
+                    use_llm = False
+
+                progress = st.progress(0, text="Sprawdzam ogłoszenia...")
+                conn_s2 = db()
+                for i, row in enumerate(all_candidates):
+                    progress.progress(
+                        (i + 1) / max(len(all_candidates), 1),
+                        text=f"Sprawdzam {i+1}/{len(all_candidates)}…"
+                    )
+                    oid   = row[0]
+                    title = (row[1] or "").lower()
+                    org   = (row[2] or "").lower()
+                    text = title + " " + org
+                    match = _simple_phrase_match(text, phrases_star) if use_llm else any(p in text for p in phrases_star)
+                    if not match and use_llm:
+                        notice_text = f"{row[1] or ''} | {row[2] or ''}"
+                        match = _llm_phrase_match(notice_text, phrases_star)
+                    if match:
+                        conn_s2.execute(
+                            "UPDATE notices SET user_status='starred' WHERE object_id=?",
+                            (oid,)
+                        )
+                        starred_count += 1
+                conn_s2.commit()
+                conn_s2.close()
+                progress.empty()
+            else:
+                conn_s2 = db()
+                for phrase in phrases_star:
+                    for row in conn_s2.execute("""
+                        SELECT object_id FROM notices
+                        WHERE user_status IS NULL
+                        AND (LOWER(order_object) LIKE ? OR LOWER(organization_name) LIKE ?)
+                    """, (f"%{phrase}%", f"%{phrase}%")).fetchall():
+                        conn_s2.execute(
+                            "UPDATE notices SET user_status='starred' WHERE object_id=?",
+                            (row[0],)
+                        )
+                        starred_count += 1
+                conn_s2.commit()
+                conn_s2.close()
+
+            st.success(f"Oznaczono ⭐ {starred_count} ogłoszeń.")
+            st.rerun()
 
 
 # ╔══════════════════════════════════════════════════════════╗
