@@ -48,13 +48,9 @@ Aplikacja działa w przeglądarce pod adresem:
 
 W lewym menu bocznym aplikacji, tuż pod nazwą **TenderBot**, znajduje się panel **⚙️ Sterowanie**. Pozwala uruchomić monitor i streszczenia bezpośrednio z przeglądarki — bez potrzeby logowania na serwer.
 
----
 
 ![Panel sterowania](pics/sterowanie.png)
 
-*(Możesz użyć dostarczonego zrzutu ekranu)*
-
----
 
 ### Elementy panelu
 
@@ -88,11 +84,9 @@ W lewym menu bocznym aplikacji, tuż pod nazwą **TenderBot**, znajduje się pan
 
 Po otwarciu aplikacji od razu widzisz listę aktywnych ogłoszeń.
 
----
 
 ![Główna lista ogłoszeń](pics/1.png)
 
----
 
 Każde ogłoszenie pokazuje:
 
@@ -127,11 +121,9 @@ Nad listą ogłoszeń znajduje się pasek filtrów, który pozwala szybko zawęz
 
 Po rozwinięciu ogłoszenia (kliknięcie na tytuł) widzisz szczegóły oraz przyciski akcji.
 
----
 
 ![Rozwinięte ogłoszenie z przyciskami akcji](pics/2.png)
 
----
 
 ### Przyciski akcji
 
@@ -150,11 +142,9 @@ Po rozwinięciu ogłoszenia (kliknięcie na tytuł) widzisz szczegóły oraz prz
 
 Przy każdym ogłoszeniu widoczne są kody CPV — to standardowy europejski system klasyfikacji zamówień. Każdy kod opisuje rodzaj przedmiotu zamówienia (np. `72000000` = Usługi informatyczne, `34970000` = Urządzenia do monitorowania ruchu).
 
----
 
 ![Kody CPV z przyciskami ignorowania](pics/3.png)
 
----
 
 Przy każdym kodzie jest przycisk **🚫** — kliknięcie doda kod do listy ignorowanych, przez co podobne ogłoszenia będą automatycznie ukrywane.
 
@@ -180,11 +170,9 @@ Zwięzłe podsumowanie najważniejszych danych:
 
 Dłuższy opis omawiający zakres prac, warunki udziału, kryteria oceny ofert i inne istotne informacje — napisany naturalnym językiem polskim.
 
----
 
 ![Streszczenie szczegółowe AI](pics/4.png)
 
----
 
 > 💡 **Jeśli streszczenie jest nieprawidłowe lub niekompletne**, kliknij **✍️ Popraw streszczenie** — model pobierze aktualne dane z ogłoszenia i wygeneruje nowe. Może to zająć kilka sekund.
 
@@ -196,11 +184,9 @@ Na górze strony, pod nagłówkiem **„🔍 Zapytaj o ogłoszenia"**, znajdzies
 
 > 💡 **Czym jest RAG?** To skrót od *Retrieval-Augmented Generation* — system, który najpierw wyszukuje pasujące ogłoszenia, a potem używa AI żeby sformułować odpowiedź. W praktyce możesz zapytać po polsku i dostaniesz sensowną odpowiedź.
 
----
 
 ![Wyszukiwarka RAG](pics/5.png)
 
----
 
 ### Przykłady pytań
 
@@ -238,12 +224,9 @@ Email zawiera:
 
 Aby przejść do ustawień, kliknij **⚙️ Ustawienia** w lewym menu bocznym aplikacji.
 
----
 
 ![Ustawienia — profil filtrów](pics/6.png)
 
-
----
 
 **Profil filtrów** określa jakie ogłoszenia są pobierane przez monitor. Możesz ustawić:
 
@@ -451,7 +434,6 @@ VACUUM;
 
 > ⚠️ **Ważne:** Nigdy nie usuwaj tabeli `notice_state` — to pamięć monitora. Bez niej monitor ponownie pobierze wszystkie ogłoszenia przy następnym uruchomieniu.
 
----
 
 ---
 
