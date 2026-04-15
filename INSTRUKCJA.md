@@ -350,12 +350,12 @@ Model językowy rozumie odmiany przez przypadki i synonimy. Wolniejszy, ale duż
 
 
 <div style="display:flex; gap:16px;">
-  <figure style="width:48%; margin:0;">
-    <img src="pics/8.png" style="width:100%;">
+  <figure style="width:28%; margin:0;">
+    <img src="pics/8.png" style="width:50%;">
     <figcaption>Ignorowane kody CPV</figcaption>
   </figure>
-  <figure style="width:48%; margin:0;">
-    <img src="pics/8a.png" style="width:100%;">
+  <figure style="width:28%; margin:0;">
+    <img src="pics/8a.png" style="width:50%;">
     <figcaption>Ignorowane kody CPV</figcaption>
   </figure>
 </div>
