@@ -261,18 +261,8 @@ To jedna z najważniejszych funkcji — pozwala automatycznie sortować ogłosze
 
 ---
 
-<div style="display:flex; gap:16px;">
-  <figure style="width:48%; margin:0;">
-    <img src="pics/7.png" style="width:100%;">
-    <figcaption>Preferowane zwroty</figcaption>
-  </figure>
-  <figure style="width:48%; margin:0;">
-    <img src="pics/7a.png" style="width:100%;">
-    <figcaption>Ignorowane zwroty</figcaption>
-  </figure>
-</div>
-
-
+<img src="pics/7.png" style="width:50%;">
+<img src="pics/7a.png" style="width:50%;">
 
 
 ---
@@ -349,16 +339,8 @@ Model językowy rozumie odmiany przez przypadki i synonimy. Wolniejszy, ale duż
 ---
 
 
-<div style="display:flex; gap:16px;">
-  <figure style="width:28%; margin:0;">
-    <img src="pics/8.png" style="width:50%;">
-    <figcaption>Ignorowane kody CPV</figcaption>
-  </figure>
-  <figure style="width:28%; margin:0;">
-    <img src="pics/8a.png" style="width:50%;">
-    <figcaption>Ignorowane kody CPV</figcaption>
-  </figure>
-</div>
+<img src="pics/8.png" style="width:50%;">
+<img src="pics/8a.png" style="width:50%;">
 ---
 
 Lista ignorowanych kodów CPV jest domyślnie **zwinięta** — widać tylko liczbę kodów w nawiasie. Kliknij nagłówek żeby ją rozwinąć.
