@@ -1,6 +1,5 @@
 # TenderBot — Instrukcja użytkownika
 
-> Przewodnik praktyczny dla osób, które chcą korzystać z aplikacji bez znajomości technicznych szczegółów.
 
 ---
 
