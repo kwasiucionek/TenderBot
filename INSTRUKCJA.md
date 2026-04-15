@@ -45,7 +45,8 @@ Aplikacja działa w przeglądarce pod adresem:
 
 ## 3. Panel sterowania — Monitor i Streszczenia
 
-W lewym menu bocznym aplikacji, tuż pod nazwą **TenderBot**, znajduje się panel **⚙️ Sterowanie**. Pozwala uruchomić monitor i streszczenia bezpośrednio z przeglądarki — bez potrzeby logowania na serwer.
+W lewym menu bocznym aplikacji, tuż pod nazwą **TenderBot**, znajduje się panel **⚙️ Sterowanie**. 
+Pozwala uruchomić monitor i streszczenia bezpośrednio z przeglądarki — bez potrzeby logowania na serwer.
 
 
 ![Panel sterowania](pics/sterowanie.png)
