@@ -242,7 +242,6 @@ Aby przejść do ustawień, kliknij **⚙️ Ustawienia** w lewym menu bocznym a
 
 ![Ustawienia — profil filtrów](pics/6.png)
 
-![Ustawienia — profil filtrów (cd.)](pics/7a.png)
 
 ---
 
@@ -263,8 +262,10 @@ To jedna z najważniejszych funkcji — pozwala automatycznie sortować ogłosze
 ---
 
 ![Preferowane i ignorowane zwroty](pics/7.png)
+![Preferowane i ignorowane zwroty (cd.)](pics/7a.png)
 
-![Preferowane i ignorowane zwroty (cd.)](pics/8a.png)
+
+
 
 ---
 
@@ -340,6 +341,7 @@ Model językowy rozumie odmiany przez przypadki i synonimy. Wolniejszy, ale duż
 ---
 
 ![Ignorowane kody CPV](pics/8.png)
+![Ignorowane kody CPV (cd.)](pics/8a.png)
 
 ---
 
