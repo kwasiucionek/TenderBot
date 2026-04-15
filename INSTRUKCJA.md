@@ -259,15 +259,16 @@ Aby przejść do ustawień, kliknij **⚙️ Ustawienia** w lewym menu bocznym a
 
 To jedna z najważniejszych funkcji — pozwala automatycznie sortować ogłoszenia bez ręcznego przeglądania każdego z nich.
 
----
+
+
+### ⭐ Preferowane zwroty — automatyczna gwiazdka
+
+
+
 <div style="display:flex; gap:16px;">
-    <img src="pics/7.png" style="width:48%;">
     <img src="pics/7a.png" style="width:48%;">
 </div>
 
----
-
-### ⭐ Preferowane zwroty — automatyczna gwiazdka
 
 Kiedy monitor pobiera nowe ogłoszenie i jego tytuł lub nazwa organizacji zawiera któryś z preferowanych zwrotów — ogłoszenie **automatycznie dostaje gwiazdkę ⭐** bez Twojej interwencji.
 
@@ -297,6 +298,10 @@ sztuczna inteligencja
 Po dodaniu zwrotów kliknij **„⭐ Oznacz istniejące ogłoszenia pasujące do zwrotów"** — aplikacja przejrzy całą bazę i oznaczy pasujące ogłoszenia. Jeśli włączony jest tryb LLM, zobaczy pasek postępu — może to potrwać chwilę.
 
 ### 🔤 Ignorowane zwroty — automatyczne pomijanie
+
+<div style="display:flex; gap:16px;">
+    <img src="pics/7.png" style="width:48%;">
+</div>
 
 Ogłoszenia zawierające te zwroty są **całkowicie pomijane przez monitor** — nie trafiają do bazy w ogóle.
 
